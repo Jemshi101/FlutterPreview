@@ -50,10 +50,9 @@ object HarnessGenerator {
             val id = "p$index"
             ids[id] = entry.key
             val build = entry.wrapper?.let { "${it}(${entry.invocation})" } ?: entry.invocation!!
-            val brightness = if (entry.brightness?.endsWith(".dark") == true) "dark" else "light"
-            "  FpPreview('$id', () => $build, ${dart(entry.width ?: options.defaultWidth)}, " +
-                "${dart(entry.height ?: options.defaultHeight)}, ${entry.height != null}, " +
-                "${dart(entry.textScaleFactor ?: 1.0)}, fp_ui.Brightness.$brightness),"
+            // Argument expressions go into Dart as written, so constants and getters resolve like in the source.
+            "  FpPreview('$id', () => $build, ${entry.sizeExpression ?: "null"}, " +
+                "${entry.textScaleExpression ?: "null"}, ${entry.brightness ?: "null"}),"
         }
 
         val setup = File(root.dir, SETUP_FILE).isFile
@@ -61,6 +60,8 @@ object HarnessGenerator {
             "SETUP_IMPORT" to if (setup) "import '${root.importUri(File(root.dir, SETUP_FILE))}' as fp_setup;" else "",
             "SOURCE_IMPORTS" to imports.joinToString("\n"),
             "PIXEL_RATIO" to dart(options.pixelRatio),
+            "DEFAULT_WIDTH" to dart(options.defaultWidth),
+            "DEFAULT_HEIGHT" to dart(options.defaultHeight),
             "PREVIEWS" to previews.joinToString("\n"),
             "SETUP_CALL" to if (setup) "await fp_setup.flutterPreviewSetup();" else "",
         )
@@ -69,7 +70,7 @@ object HarnessGenerator {
     }
 
     /** A `part of` file can't be imported: use the library it belongs to. */
-    private fun libraryOf(file: File, text: String): File {
+    internal fun libraryOf(file: File, text: String): File {
         val sanitized = DartText.sanitize(text)
         val partOf = Regex("""(?m)^\s*part\s+of\s+(['"])""").find(sanitized) ?: return file
         val start = partOf.range.last

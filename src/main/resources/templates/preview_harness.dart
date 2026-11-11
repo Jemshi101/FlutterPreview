@@ -13,17 +13,25 @@ import 'package:flutter_test/flutter_test.dart' as fp_t;
 /*FP:SOURCE_IMPORTS*/
 
 const double fpPixelRatio = /*FP:PIXEL_RATIO*/;
+const double fpDefaultWidth = /*FP:DEFAULT_WIDTH*/;
+const double fpDefaultHeight = /*FP:DEFAULT_HEIGHT*/;
 
+/// One preview. [size], [textScale] and [brightness] are the annotation's own expressions, evaluated here.
 class FpPreview {
-  const FpPreview(this.id, this.build, this.width, this.height, this.fixedHeight, this.textScale, this.brightness);
+  FpPreview(this.id, this.build, this.size, double? textScale, fp_ui.Brightness? brightness)
+      : textScale = textScale ?? 1.0,
+        brightness = brightness ?? fp_ui.Brightness.light;
 
   final String id;
   final fp_m.Widget Function() build;
-  final double width;
-  final double height;
-  final bool fixedHeight;
+  final fp_ui.Size? size;
   final double textScale;
   final fp_ui.Brightness brightness;
+
+  /// An infinite dimension in `size:` means "not fixed" for that dimension.
+  double get width => size != null && size!.width.isFinite ? size!.width : fpDefaultWidth;
+  double get height => size != null && size!.height.isFinite ? size!.height : fpDefaultHeight;
+  bool get fixedHeight => size != null && size!.height.isFinite;
 }
 
 final List<FpPreview> fpPreviews = <FpPreview>[

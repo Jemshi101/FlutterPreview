@@ -39,25 +39,53 @@ object PreviewStubGenerator {
         return null
     }
 
-    fun previewFunctionName(source: String, cls: WidgetClass): String {
-        val base = cls.name.trimStart('_').replaceFirstChar { it.lowercase() } + "Preview"
+    /** The widget class whose header or body contains [offset], if any. */
+    fun widgetClassContaining(source: String, offset: Int): WidgetClass? {
+        widgetClassAt(source, offset)?.let { return it }
+        val sanitized = DartText.sanitize(source)
+        for (match in classHeader.findAll(sanitized)) {
+            if (!match.groupValues[2].endsWith("Widget")) continue
+            val open = sanitized.indexOf('{', match.range.last)
+            if (open < 0) continue
+            val close = DartText.matchingClose(sanitized, open)
+            if (close < 0) continue
+            val classStart = sanitized.lastIndexOf("class", match.groups[1]!!.range.first)
+            if (offset in classStart..close) return WidgetClass(match.groupValues[1], classStart..open, open, close)
+        }
+        return null
+    }
+
+    fun previewFunctionName(source: String, cls: WidgetClass): String =
+        uniqueName(cls.name.trimStart('_').replaceFirstChar { it.lowercase() } + "Preview", source)
+
+    /** [base], or base2, base3… if [text] already declares or calls it. */
+    fun uniqueName(base: String, text: String): String {
         var name = base
         var n = 2
-        while (Regex("""\b${Regex.escape(name)}\s*\(""").containsMatchIn(source)) name = base + n++
+        while (Regex("""\b${Regex.escape(name)}\s*\(""").containsMatchIn(text)) name = base + n++
         return name
+    }
+
+    /** `@Preview(...)` + `Widget name() { return call; }`. [arguments] are annotation arguments, `key: expression`. */
+    fun functionCode(functionName: String, call: String, arguments: List<String>): String = buildString {
+        if (arguments.size <= 1) {
+            append("@Preview(${arguments.joinToString()})\n")
+        } else {
+            append("@Preview(\n")
+            arguments.forEach { append("  $it,\n") }
+            append(")\n")
+        }
+        append("Widget $functionName() {\n")
+        append("  return $call;\n")
+        append("}\n")
     }
 
     /** Insertions that add the preview function after the class and the `widget_previews` import if missing. */
     fun insertions(source: String, cls: WidgetClass): List<Insertion> {
         val sanitized = DartText.sanitize(source)
         val functionName = previewFunctionName(source, cls)
-        val call = constructorCall(source, sanitized, cls)
-        val function = buildString {
-            append("\n\n@Preview(name: '${cls.name}')\n")
-            append("Widget $functionName() {\n")
-            append("  return $call;\n")
-            append("}\n")
-        }
+        val call = constructorCall(source, cls, allowPrivate = true)!!
+        val function = "\n\n" + functionCode(functionName, call, listOf("name: '${cls.name}'"))
         val result = mutableListOf(Insertion(cls.bodyClose + 1, function.trimEnd('\n')))
 
         if (!source.contains(PREVIEW_IMPORT)) {
@@ -75,9 +103,12 @@ object PreviewStubGenerator {
 
     /**
      * `MyWidget(label: 'Label', onTap: () {})`. Picks the unnamed constructor, else the public named one with
-     * the fewest required arguments (e.g. `Row.header()`), and a private one (`Row._`) only as a last resort.
+     * the fewest required arguments (e.g. `Row.header()`), and a private one (`Row._`) only as a last resort, and
+     * only when [allowPrivate] (code in another library can't call it). Null when no usable constructor exists.
      */
-    private fun constructorCall(source: String, sanitized: String, cls: WidgetClass): String {
+    fun constructorCall(source: String, cls: WidgetClass, allowPrivate: Boolean): String? {
+        val sanitized = DartText.sanitize(source)
+        var foundAny = false
         val constructor = Regex("""(?<![\w$.])${Regex.escape(cls.name)}(\.[A-Za-z_$][\w$]*)?\s*\(""")
             .findAll(sanitized, cls.bodyOpen + 1)
             .filter { it.range.first < cls.bodyClose && depthInBody(sanitized, cls.bodyOpen, it.range.first) == 0 }
@@ -91,11 +122,14 @@ object PreviewStubGenerator {
                     suffix.startsWith("._") -> 2
                     else -> 1
                 }
+                foundAny = true
                 Constructor(cls.name + suffix, requiredParams(source, sanitized, open + 1, close, cls), rank)
             }
+            .toList()
+            .filter { allowPrivate || it.rank < 2 }
             .sortedWith(compareBy({ it.rank }, { it.params.size }))
             .firstOrNull()
-            ?: return "${cls.name}()"
+            ?: return if (foundAny) null else "${cls.name}()" // no constructor declared: the implicit one
         val callee = constructor.callee
         val params = constructor.params
         if (params.isEmpty()) return "$callee()"

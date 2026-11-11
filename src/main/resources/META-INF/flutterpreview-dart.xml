@@ -9,4 +9,14 @@
             <category>Flutter</category>
         </intentionAction>
     </extensions>
+
+    <actions>
+        <action id="FlutterPreview.GeneratePreview"
+                class="in.bleuphoenix.flutterpreview.dart.GeneratePreviewAction"
+                text="Generate Flutter Preview…"
+                description="Add a @Preview for the widget at the caret to a file in the package's previews/ folder"
+                icon="AllIcons.Actions.Preview">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

@@ -25,6 +25,15 @@ data class PreviewEntry(
     val brightness: String?,
     /** `textScaleFactor:` argument. */
     val textScaleFactor: Double?,
+    /**
+     * The `size:` and `textScaleFactor:` arguments exactly as written ([brightness] is kept as written too). The
+     * harness passes them to Dart as-is, so constants such as `size: kPhoneSize` work; [width], [height] and
+     * [textScaleFactor] are only the literal values, for display.
+     */
+    val sizeExpression: String? = null,
+    /** The `group:` argument as written, e.g. a constant like `kDialogsGroup`. */
+    val groupExpression: String? = null,
+    val textScaleExpression: String? = null,
     /** Why this preview can't be rendered, if it can't. */
     val problem: String?,
 ) {
@@ -44,7 +53,8 @@ object PreviewParser {
     private val containerDeclaration =
         Regex("""\b(?:(?:abstract|base|final|sealed|interface)\s+)*(class|mixin|extension)\s+([A-Za-z_$][\w$]*)""")
     private val declarationName = Regex("""([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*$""")
-    private val sizeExpression =
+    private val privateName = Regex("""(?<![\w$.])_[A-Za-z0-9_$]""")
+    private val sizeLiteral =
         Regex("""Size\s*\(\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*([0-9]+(?:\.[0-9]+)?)\s*\)""")
 
     fun parse(source: String): List<PreviewEntry> {
@@ -95,7 +105,7 @@ object PreviewParser {
         val endOffset = if (paramsClose > paramsOpen) declarationEnd(sanitized, paramsClose + 1) else paramsOpen
         val container = containers.filter { annotationStart in it.body }.minByOrNull { it.body.last - it.body.first }
 
-        val size = args["size"]?.let { sizeExpression.find(it) }
+        val size = args["size"]?.let { sizeLiteral.find(it) }
         var problem: String? = null
         val invocation: String? = when {
             container == null -> "$declaration()"
@@ -109,6 +119,12 @@ object PreviewParser {
         val names = listOfNotNull(container?.name) + declaration.split('.')
         if (problem == null && names.any { it.startsWith("_") }) {
             problem = "Private declarations can't be previewed: make `${names.joinToString(".")}` public."
+        }
+        // The harness is another library: it can't see private names used in the annotation's arguments.
+        val privateArgument = listOf("size", "wrapper", "brightness", "textScaleFactor")
+            .firstOrNull { key -> args[key]?.let { DartText.sanitize(it).contains(privateName) } == true }
+        if (problem == null && privateArgument != null) {
+            problem = "`$privateArgument:` uses a private name, which the preview renderer can't access: make it public."
         }
         if (problem == null && params.isNotEmpty() && (params.contains("required") || params.first() !in "{[")) {
             problem = "Preview functions must not take required arguments."
@@ -133,6 +149,9 @@ object PreviewParser {
             wrapper = args["wrapper"]?.trim()?.takeIf { it.matches(Regex("""[A-Za-z_$][\w$.]*""")) },
             brightness = args["brightness"]?.trim(),
             textScaleFactor = args["textScaleFactor"]?.trim()?.toDoubleOrNull(),
+            sizeExpression = args["size"]?.trim()?.ifEmpty { null },
+            groupExpression = args["group"]?.trim()?.ifEmpty { null },
+            textScaleExpression = args["textScaleFactor"]?.trim()?.ifEmpty { null },
             problem = problem,
         )
     }

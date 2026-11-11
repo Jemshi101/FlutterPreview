@@ -45,6 +45,10 @@ fonts), real assets, and your theme or wrapper.
   * a gutter icon on every `@Preview`, which opens that preview,
   * the caret follows: moving into a preview function selects it,
   * **Alt+Enter → "Create @Preview for this widget"** generates a preview function with placeholder arguments.
+  * **Right-click → "Generate Flutter Preview…"** on a widget class, or on a usage such as `StatusTile(`, adds a
+    preview to the package's `previews/` folder: a new file that mirrors the widget's location
+    (`lib/widgets/status/status_tile.dart` → `previews/status/status_tile_previews.dart`), or an existing preview file
+    of your choice. It adds only the imports that are missing, and reuses the target file's `group:` and `wrapper:`.
 * **Problems, not crashes.** Overflow and layout errors are listed under the image. Repeating animations such as
   spinners are noted, not treated as errors.
 * **Native calls are stubbed.** Platform channel calls that nothing answers get an empty success reply, so widgets
@@ -106,10 +110,12 @@ class StatusTile extends StatelessWidget {
 | `@Preview` argument | Effect |
 |---|---|
 | `name`, `group` | Title in the list (the group is shown in the tooltip) |
-| `size: Size(w, h)` | Fixed logical size. Without it, the preview is 400 wide and as tall as its content (up to 800). |
+| `size` | Fixed logical size: any `Size` expression, e.g. `Size(390, 844)` or a constant like `kPhoneSize`. Use `double.infinity` for a dimension that shouldn't be fixed. Without it, the preview is 400 wide and as tall as its content (up to 800). |
 | `wrapper` | A `Widget Function(Widget)` that wraps the preview (theme, padding, providers…) |
-| `brightness` | `Brightness.light` or `Brightness.dark` for the `MaterialApp` theme |
-| `textScaleFactor` | Text scaling |
+| `brightness` | A `Brightness` expression for the `MaterialApp` theme |
+| `textScaleFactor` | Text scaling (any `double` expression) |
+
+Argument values are evaluated in Dart exactly as written, so constants and getters work, as long as they are public: the renderer is a separate library and can't see `_private` names (such previews are flagged in the list).
 
 Previews can live anywhere in the package, such as `lib/` or a top-level `previews/` folder, as long as the file is
 inside the package that contains `pubspec.yaml`.
@@ -168,13 +174,24 @@ Tool window ◄── per-file cache ◄── PreviewRenderer (PNG, problems, n
 * The `core` package uses no IntelliJ APIs. The `ui` package holds the tool window, and the `dart` package holds
   the optional Dart-plugin features.
 
+### Generated previews
+
+Both generators fill required constructor arguments with placeholders: `'Label'` for a `String`, `() {}` for
+callbacks, `const Placeholder()` for a `Widget`, `16.0` for size-like `double`s, `const []` for lists. A type they
+can't guess becomes `throw UnimplementedError('TODO: name (Type)')`, which renders as an error until you replace
+it. They choose the unnamed constructor, then the public named one with the fewest required arguments. A preview in
+a separate file can't use private classes or private constructors, and "Generate Flutter Preview…" says so instead
+of writing code that won't compile.
+
 ## Project layout
 
 ```
 src/main/kotlin/in/bleuphoenix/flutterpreview/
-├─ core/   PreviewParser, DartText, HarnessGenerator, PreviewRenderer, PreviewStubGenerator, FlutterProject (pub root, SDK lookup)
+├─ core/   PreviewParser, DartText, HarnessGenerator, PreviewRenderer, PreviewStubGenerator, PreviewFileGenerator,
+          FlutterProject (pub root, SDK lookup)
 ├─ ui/     tool window: FlutterPreviewPanel, PreviewImageComponent (zoom), PreviewGridPanel, PreviewImages (copy/save)
-└─ dart/   PreviewLineMarkerProvider (gutter), CreatePreviewIntention, loaded only with the Dart plugin
+└─ dart/   PreviewLineMarkerProvider (gutter), CreatePreviewIntention, GeneratePreviewAction (context menu),
+          loaded only with the Dart plugin
 src/main/resources/
 ├─ META-INF/plugin.xml, flutterpreview-dart.xml
 └─ templates/preview_harness.dart   the generated test's template
@@ -198,6 +215,9 @@ FP_IT_PROJECT=/path/to/flutter/package ./gradlew test --rerun
 * `RenderIntegrationTest` renders every preview in the package; the PNGs go to `build/preview-renders/`.
 * `StubIntegrationTest` generates a preview with "Create @Preview" for each widget file it checks and renders it;
   the PNGs go to `build/stub-renders/`.
+* `GenerateFileIntegrationTest` uses "Generate Flutter Preview…" to write new preview files, and to append to a copy
+  of an existing one, then renders them. Its temporary `previews/**/zz_fp_check_*.dart` files are always deleted;
+  the PNGs go to `build/generated-renders/`.
 
 The build compiles against the local Android Studio install with a Java 25 toolchain (Android Studio's own JBR,
 configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plugin 2.x.
@@ -216,14 +236,14 @@ configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plug
 ## Limitations
 
 * Each render is a fresh `flutter test` run: about 3–5 s per file of widget previews, and more for full-page previews
-  that pull in a large part of the app.
+  that pull in a large part of the app. This is deliberate: nothing stays running between renders, so the ~1 GB the
+  Dart compiler and the test engine use is released as soon as a render finishes.
 * Previews are images: you can't tap or scroll them.
 * Subclasses of `Preview` (MultiPreview) and `Preview` arguments other than those listed above aren't supported
   yet.
 
 ## Roadmap
 
-* A persistent headless engine with hot reload, for updates under a second
 * A variant matrix: light and dark, text scales, device sizes, RTL and locales side by side
 * Click on the image to jump to the widget's source
 * A visual diff against a pinned baseline

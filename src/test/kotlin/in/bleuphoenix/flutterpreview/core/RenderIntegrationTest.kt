@@ -98,3 +98,51 @@ class StubIntegrationTest {
         assertTrue("Nothing rendered", total > 0)
     }
 }
+
+/**
+ * "Generate Flutter Preview…": for each widget file under lib/widgets/system_inspection, writes a new preview file
+ * and appends to a copy of an existing preview file (next to the original, so its relative imports work), then
+ * renders both. Temporary files are named zz_fp_check_* and always deleted.
+ */
+class GenerateFileIntegrationTest {
+
+    @Test
+    fun `generated preview files compile and render`() {
+        val projectPath = System.getenv("FP_IT_PROJECT").orEmpty()
+        assumeTrue("FP_IT_PROJECT not set", projectPath.isNotEmpty())
+        val root = PubRoot.find(File(projectPath, "pubspec.yaml"))!!
+        val renderer = PreviewRenderer(FlutterSdkLocator.find(root, System.getenv())!!)
+        val existing = PreviewFileGenerator.existingPreviewFiles(root).firstOrNull { it.name.endsWith("widgets_previews.dart") }
+        assumeTrue("no existing preview file", existing != null)
+        val outDir = File("build/generated-renders").apply { deleteRecursively(); mkdirs() }
+        val classDecl = Regex("""\bclass\s+[A-Z]\w*[^{;]*?\bextends\s+\w*Widget\b""")
+        val widgets = File(root.dir, "lib/widgets/system_inspection").walkTopDown()
+            .filter { it.extension == "dart" && classDecl.containsMatchIn(it.readText()) }.toList()
+
+        val temp = mutableListOf<File>()
+        try {
+            var appended = existing!!.readText()
+            val appendFile = File(existing.parentFile, "zz_fp_check_append.dart").also { temp += it }
+            for (widget in widgets) {
+                val text = widget.readText()
+                val cls = PreviewStubGenerator.widgetClassContaining(text, classDecl.find(text)!!.range.first + 6)!!
+                val newFile = File(existing.parentFile, "zz_fp_check_new_${widget.nameWithoutExtension}.dart").also { temp += it }
+                newFile.writeText(PreviewFileGenerator.generate(root, widget, text, cls, newFile, null).text)
+                appended = PreviewFileGenerator.generate(root, widget, text, cls, appendFile, appended).text
+            }
+            appendFile.writeText(appended)
+
+            for (file in temp) {
+                val text = file.readText()
+                val entries = PreviewParser.parse(text).filter { it.invocation != null }
+                val result = renderer.render(root, HarnessGenerator.generate(root, file, text, entries))
+                println("${file.name}: ${entries.size} previews -> exit ${result.exitCode}, rendered ${result.images.size}")
+                if (result.images.size != entries.size) println(result.log.lines().filter { "rror" in it }.take(15).joinToString("\n"))
+                entries.forEach { e -> result.images[e.key]?.let { File(outDir, "${file.nameWithoutExtension}-${e.declaration}.png").writeBytes(it.png) } }
+                assertEquals("Missing renders in ${file.name}", entries.size, result.images.size)
+            }
+        } finally {
+            temp.forEach { it.delete() }
+        }
+    }
+}

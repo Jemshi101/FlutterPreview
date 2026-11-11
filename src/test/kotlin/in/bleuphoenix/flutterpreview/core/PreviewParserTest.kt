@@ -105,4 +105,31 @@ class PreviewParserTest {
         assertEquals("x()", entry.invocation)
         assertNull(entry.problem)
     }
+
+    @Test
+    fun `keeps argument expressions and flags private names`() {
+        val source = """
+            const Size kPhone = Size(390, 844);
+            const Size _private = Size(1, 1);
+            Widget _wrap(Widget child) => child;
+
+            @Preview(name: 'const size', size: kPhone, textScaleFactor: 2, brightness: Brightness.dark)
+            Widget a() => const SizedBox();
+
+            @Preview(name: 'private size', size: _private)
+            Widget b() => const SizedBox();
+
+            @Preview(name: 'private wrapper', wrapper: _wrap)
+            Widget c() => const SizedBox();
+        """.trimIndent()
+
+        val (a, b, c) = PreviewParser.parse(source)
+
+        assertEquals("kPhone", a.sizeExpression)
+        assertEquals("2", a.textScaleExpression)
+        assertEquals("Brightness.dark", a.brightness)
+        assertNull(a.problem)
+        assertTrue(b.problem!!.contains("`size:`"))
+        assertTrue(c.problem!!.contains("`wrapper:`"))
+    }
 }
