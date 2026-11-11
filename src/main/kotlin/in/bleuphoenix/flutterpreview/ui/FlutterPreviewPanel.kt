@@ -20,6 +20,11 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
+import com.intellij.openapi.vfs.LocalFileSystem
+import `in`.bleuphoenix.flutterpreview.core.PreviewSetup
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAwareAction
@@ -187,6 +192,10 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             add(toggle("Grid", "Show all previews of the file as thumbnails", gridIcon, get = { gridMode }, set = ::showGrid))
             add(toggle("Render on Save", "Re-render when a Dart file of the package is saved", AllIcons.Actions.Lightning,
                 get = { renderOnSave }, set = { renderOnSave = it }))
+            add(action("Edit Preview Setup", "Open .flutter_preview/setup.dart: local setup run before previews render",
+                AllIcons.General.Settings, enabled = { currentRoot != null }) {
+                currentRoot?.let { root -> openSetup(ensureSetup(root).file) }
+            })
             add(toggle("Show Log", "Show the flutter test output", AllIcons.Nodes.Console,
                 get = { showingLog }, set = { showingLog = it; logShownForFailure = false; refreshView() }))
             addSeparator()
@@ -499,6 +508,34 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
 
     // endregion
 
+    // region Setup file
+
+    /** Creates `.flutter_preview/setup.dart` (gitignored) on the package's first render, and says so once. */
+    private fun ensureSetup(root: PubRoot): PreviewSetup.Ensured {
+        val ensured = PreviewSetup.ensure(root)
+        if (!ensured.created) return ensured
+        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ensured.file)
+        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(root.dir, ".gitignore"))
+        val ignored = if (ensured.gitignoreUpdated) "Added <code>${PreviewSetup.GITIGNORE_ENTRY}</code> to .gitignore." else ""
+        NotificationGroupManager.getInstance().getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(
+                "Flutter Preview setup file created",
+                "<code>${PreviewSetup.FILE}</code> in ${root.packageName} runs before previews render: initialise " +
+                    "singletons or mock platform channels there. It's only used by this plugin and stays local. $ignored",
+                NotificationType.INFORMATION,
+            )
+            .addAction(NotificationAction.createSimpleExpiring("Open") { openSetup(ensured.file) })
+            .notify(project)
+        return ensured
+    }
+
+    private fun openSetup(file: File) {
+        val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) ?: return
+        WriteIntentReadAction.run(Runnable { OpenFileDescriptor(project, virtualFile).navigate(true) })
+    }
+
+    // endregion
+
     // region Rendering
 
     /** Renders every preview of the current file in one `flutter test` run. */
@@ -507,6 +544,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         val root = currentRoot ?: return
         val renderable = entries.filter { it.invocation != null }
         if (renderable.isEmpty()) return
+        ensureSetup(root)
 
         // The harness is compiled from disk. Swing events don't hold the write-intent lock saving needs.
         WriteIntentReadAction.run(Runnable { FileDocumentManager.getInstance().saveAllDocuments() })
@@ -642,5 +680,6 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         const val CARD_GRID = "grid"
         const val CARD_LOG = "log"
         const val MAX_CACHED_FILES = 6
+        const val NOTIFICATION_GROUP = "Flutter Preview"
     }
 }

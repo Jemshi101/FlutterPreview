@@ -122,7 +122,7 @@ inside the package that contains `pubspec.yaml`.
 
 ### Setup hook
 
-If the package contains `test/flutter_preview_setup.dart` with
+Each package gets a plugin-only setup file, **`.flutter_preview/setup.dart`**:
 
 ```dart
 Future<void> flutterPreviewSetup() async {
@@ -130,14 +130,20 @@ Future<void> flutterPreviewSetup() async {
 }
 ```
 
-the plugin calls it once before rendering. It runs with real async I/O, so it can load files or assets.
+* The first render in a package creates it from a commented template, adds `/.flutter_preview/` to the package's
+  `.gitignore` (creating the file if needed), and shows a notification with an **Open** link.
+* It's local to each developer and only used by the plugin. It isn't part of your app or your tests, so test mock
+  helpers stay where they belong.
+* Open it any time with **Edit Preview Setup** (⚙) in the tool window toolbar.
+* The plugin calls it once before rendering, with real async I/O, so it can load files or assets.
+* If you delete the `.gitignore` entry on purpose, it isn't added back.
 
 ### Native plugins and platform channels
 
 There is no Android or iOS side under `flutter test`. Any platform channel call that nothing answers gets an empty
 success reply. The status line notes the plugins that were stubbed, for example
 `native calls stubbed: wakelock_plus_platform_interface`. `void` calls just do nothing. Calls that need a real value
-get `null`. To return something specific, register a mock in the setup hook. Mocks take precedence over the stub:
+get `null`. To return something specific, register a mock in `.flutter_preview/setup.dart`. Mocks take precedence over the stub:
 
 ```dart
 import 'package:flutter/services.dart';
@@ -228,8 +234,8 @@ configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plug
 |---|---|
 | "Flutter SDK not found" | Run `flutter pub get` in the package, or set `FLUTTER_ROOT`. |
 | Red status "Last render failed" | The code didn't compile when it was saved. Open the log (console button) for the compiler error; the next good save fixes it. |
-| Labels show raw keys, or singletons throw | Initialise them in the setup hook. |
-| A widget needs a value from a platform channel | Mock that channel in the setup hook. |
+| Labels show raw keys, or singletons throw | Initialise them in `.flutter_preview/setup.dart` (**Edit Preview Setup**). |
+| A widget needs a value from a platform channel | Mock that channel in `.flutter_preview/setup.dart`. |
 | Text renders as black boxes | A font family isn't declared in `pubspec.yaml`, so only Roboto and the fonts in the FontManifest are loaded. |
 | Nothing happens on save | Check that **Render on Save** (⚡) is on, or press **Render** (↻). |
 

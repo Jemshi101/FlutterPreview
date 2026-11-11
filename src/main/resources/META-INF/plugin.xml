@@ -13,6 +13,7 @@
     <depends optional="true" config-file="flutterpreview-dart.xml">Dart</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Flutter Preview" displayType="BALLOON"/>
         <toolWindow id="Flutter Preview"
                     anchor="right"
                     icon="/icons/flutterPreview.svg"

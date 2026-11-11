@@ -22,7 +22,7 @@ data class Harness(val code: String, val ids: Map<String, String>)
 object HarnessGenerator {
 
     /** Optional per-project hook: `Future<void> flutterPreviewSetup()` in this file runs before rendering. */
-    const val SETUP_FILE = "test/flutter_preview_setup.dart"
+    const val SETUP_FILE = PreviewSetup.FILE
 
     private val template: String by lazy {
         HarnessGenerator::class.java.getResource("/templates/preview_harness.dart")!!.readText()
