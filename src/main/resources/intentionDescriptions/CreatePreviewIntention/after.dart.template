@@ -1,0 +1,12 @@
+class StatusTile extends StatelessWidget {
+  const StatusTile({super.key, required this.label});
+
+  final String label;
+}
+
+<spot>@Preview(name: 'StatusTile')
+Widget statusTilePreview() {
+  return StatusTile(
+    label: 'Label',
+  );
+}</spot>

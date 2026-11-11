@@ -1,0 +1,12 @@
+<!-- Loaded only when the Dart plugin is installed (optional dependency in plugin.xml). -->
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <codeInsight.lineMarkerProvider language="Dart"
+                                        implementationClass="in.bleuphoenix.flutterpreview.dart.PreviewLineMarkerProvider"/>
+        <intentionAction>
+            <language>Dart</language>
+            <className>in.bleuphoenix.flutterpreview.dart.CreatePreviewIntention</className>
+            <category>Flutter</category>
+        </intentionAction>
+    </extensions>
+</idea-plugin>

@@ -1,0 +1,21 @@
+<idea-plugin>
+    <id>in.bleuphoenix.flutterpreview</id>
+    <name>Flutter Preview</name>
+    <vendor url="https://github.com/Jemshi101/FlutterPreview">Jemshi101</vendor>
+    <description><![CDATA[
+    Lists the <code>@Preview</code> widgets in the focused Dart file and renders them headlessly with
+    <code>flutter test</code>, without a browser: single view with zoom, or a thumbnail grid. Re-renders on save,
+    adds gutter icons on <code>@Preview</code>, follows the caret, and offers a "Create @Preview" intention.
+    <p>Source, docs and issues: <a href="https://github.com/Jemshi101/FlutterPreview">github.com/Jemshi101/FlutterPreview</a></p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="flutterpreview-dart.xml">Dart</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Flutter Preview"
+                    anchor="right"
+                    icon="/icons/flutterPreview.svg"
+                    factoryClass="in.bleuphoenix.flutterpreview.ui.FlutterPreviewToolWindowFactory"/>
+    </extensions>
+</idea-plugin>

@@ -1,0 +1,5 @@
+class <spot>StatusTile</spot> extends StatelessWidget {
+  const StatusTile({super.key, required this.label});
+
+  final String label;
+}
