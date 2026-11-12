@@ -1,0 +1,79 @@
+<p>
+  <b>See your Flutter widgets while you write them, right inside Android Studio and IntelliJ IDEA, without a
+  browser, an emulator or a running app.</b>
+</p>
+<p>
+  Flutter Preview renders the <code>@Preview</code> functions of the Dart file you're editing with the same headless
+  engine your widget tests use (<code>flutter test</code>), and shows them in a tool window. Real fonts, real assets,
+  your theme and your wrapper are all included, and the previews re-render when you save.
+</p>
+
+<p><img src="https://raw.githubusercontent.com/Jemshi101/FlutterPreview/main/docs/images/screenshot-single.png"
+        alt="The Flutter Preview tool window next to a Dart file: the list of previews and the selected preview" width="800"/></p>
+
+<h3>Features</h3>
+<ul>
+  <li><b>Whole-file rendering.</b> All previews in the focused file render in one run and are cached, so switching
+    between them is instant. Saving re-renders in the background, and the last good images stay visible while the
+    code doesn't compile.</li>
+  <li><b>Single view with zoom:</b> zoom in and out, 100 %, fit all, fit width and fit height. ⌘/Ctrl + mouse
+    wheel also zooms.</li>
+  <li><b>Grid view</b> of every preview in the file, with adjustable thumbnail size.</li>
+  <li><b>Layout problems at a glance.</b> Overflows and other errors are listed under the image instead of breaking
+    the render.</li>
+  <li><b>Copy Image / Save Image As…</b> for pull requests, tickets and docs.</li>
+  <li><b>Editor integration</b> (with the Dart plugin):
+    <ul>
+      <li>a gutter icon on every <code>@Preview</code>, and the selection follows the caret;</li>
+      <li><b>Alt+Enter → Create @Preview for this widget</b>, with placeholder arguments;</li>
+      <li><b>Right-click → Generate Flutter Preview…</b>, which adds a preview for the widget under the caret to a
+        new or existing file in your <code>previews/</code> folder.</li>
+    </ul>
+  </li>
+  <li><b>Works with real apps.</b> <code>@Preview</code> arguments such as <code>size: kPhoneSize</code> are
+    evaluated in Dart. Native plugin calls (wakelock, shared_preferences, MethodChannels…) that nothing answers are
+    stubbed. A local, gitignored <code>.flutter_preview/setup.dart</code> can initialise singletons or mock
+    channels.</li>
+  <li><b>Light on memory.</b> Nothing stays running between renders: memory is used only while a render runs.</li>
+</ul>
+
+<p><img src="https://raw.githubusercontent.com/Jemshi101/FlutterPreview/main/docs/images/screenshot-grid.png"
+        alt="Grid view: thumbnails of every preview in the file" width="800"/></p>
+
+<p><img src="https://raw.githubusercontent.com/Jemshi101/FlutterPreview/main/docs/images/screenshot-generate.png"
+        alt="Right-click a widget, Generate Flutter Preview, choose the preview file" width="800"/></p>
+
+<h3>Rendered by the plugin</h3>
+<p>Light, dark and large-text versions of the same widgets, and a full page next to its components, exactly as
+  Flutter Preview renders them:</p>
+<p><img src="https://raw.githubusercontent.com/Jemshi101/FlutterPreview/main/docs/images/render-variants.png"
+        alt="The same widgets rendered in light, dark and text scale 1.3" width="800"/></p>
+<p><img src="https://raw.githubusercontent.com/Jemshi101/FlutterPreview/main/docs/images/render-page-and-components.png"
+        alt="A settings page rendered next to its components" width="800"/></p>
+
+<h3>Getting started</h3>
+<ol>
+  <li>Run <code>flutter pub get</code> in your Flutter package.</li>
+  <li>Add a preview (<code>import 'package:flutter/widget_previews.dart';</code>):
+    <pre>@Preview(name: 'Status tile', size: Size(360, 120))
+Widget statusTilePreview() => const StatusTile(label: 'Online');</pre>
+    or right-click a widget and choose <b>Generate Flutter Preview…</b>.</li>
+  <li>Open <b>View → Tool Windows → Flutter Preview</b>.</li>
+</ol>
+
+<h3>Requirements</h3>
+<ul>
+  <li>Android Studio 2026.2 or IntelliJ IDEA 2026.2 (build 262) or newer.</li>
+  <li>A Flutter SDK. The package must have run <code>flutter pub get</code>.</li>
+  <li>Optional: the Dart plugin, for the editor integration.</li>
+</ul>
+
+<p>
+  <a href="https://github.com/Jemshi101/FlutterPreview">Source code, documentation and issues</a> ·
+  <a href="https://github.com/Jemshi101/FlutterPreview/tree/main/sample">Sample project</a>
+</p>
+<p>
+  <small>Flutter Preview is an independent plugin by Jemsheer K D. It is not affiliated with or endorsed by Google
+  or the Flutter team. Flutter and the related logo are trademarks of Google LLC. Licensed under the GNU GPL v3 with
+  an author-attribution term (see NOTICE).</small>
+</p>

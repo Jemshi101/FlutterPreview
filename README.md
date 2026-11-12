@@ -6,19 +6,13 @@ An Android Studio plugin that renders Flutter `@Preview` widgets right in the ID
 Open a Dart file with `@Preview` annotations. The **Flutter Preview** tool window lists the previews, renders all
 of them in one run, and re-renders them when you save.
 
-```
-┌─ Flutter Preview ──────────────────────────────────────────────────────────┐
-│ ↻ ■ │ ▦ ⚡ ▤                                                               │
-├──────────────────────────┬─────────────────────────────────────────────────┤
-│ bus_test_previews.dart   │ − + 1:1 │ ⤢ ↔ ↕ │ ⧉ 💾   100%                   │
-│ ▸ Page Title             │ ✓ Result - siren · 10 rendered in 4.3 s         │
-│ ▸ Test Hint              ├─────────────────────────────────────────────────┤
-│ ▸ Result - siren      ◀──│                                                 │
-│ ▸ Result - empty         │            ┌───────────────────────┐            │
-│ …                        │            │   rendered widget     │            │
-│                          │            └───────────────────────┘            │
-└──────────────────────────┴─────────────────────────────────────────────────┘
-```
+![The Flutter Preview tool window next to a Dart file with previews](docs/images/screenshot-single.png)
+
+| Grid view | Generate Flutter Preview… |
+|---|---|
+| ![Grid view of every preview in the file](docs/images/screenshot-grid.png) | ![Right-click a widget and choose where its preview goes](docs/images/screenshot-generate.png) |
+
+Want to try it first? The [`sample/`](sample) folder is a small Flutter package with ready-made previews.
 
 ## Why
 
@@ -76,7 +70,8 @@ cd FlutterPreview
 
 Then in Android Studio go to **Settings → Plugins → ⚙ → Install Plugin from Disk…**, pick
 `build/distributions/FlutterPreview-<version>.zip`, and restart.
-Open the plugin from **View → Tool Windows → Flutter Preview**.
+Open the plugin from **View → Tool Windows → Flutter Preview**. To try it without your own project, open the
+[`sample/`](sample) folder after running `flutter pub get` in it.
 
 `gradle.properties` points `androidStudioPath` at `/Applications/Android Studio.app`; change it if your Android
 Studio is installed somewhere else.
@@ -194,14 +189,18 @@ of writing code that won't compile.
 ```
 src/main/kotlin/in/bleuphoenix/flutterpreview/
 ├─ core/   PreviewParser, DartText, HarnessGenerator, PreviewRenderer, PreviewStubGenerator, PreviewFileGenerator,
-          FlutterProject (pub root, SDK lookup)
+│          PreviewSetup, FlutterProject (pub root, SDK lookup)
 ├─ ui/     tool window: FlutterPreviewPanel, PreviewImageComponent (zoom), PreviewGridPanel, PreviewImages (copy/save)
-└─ dart/   PreviewLineMarkerProvider (gutter), CreatePreviewIntention, GeneratePreviewAction (context menu),
-          loaded only with the Dart plugin
+├─ dart/   PreviewLineMarkerProvider (gutter), CreatePreviewIntention, GeneratePreviewAction (context menu),
+│          loaded only with the Dart plugin
+└─ dev/    ScreenshotRunner: produces the screenshots in docs/images (inert unless enabled, see below)
 src/main/resources/
-├─ META-INF/plugin.xml, flutterpreview-dart.xml
-└─ templates/preview_harness.dart   the generated test's template
-PLAN.md     design notes and the decision to render headlessly instead of in a browser
+├─ META-INF/plugin.xml, flutterpreview-dart.xml, pluginIcon.svg
+└─ templates/preview_harness.dart, preview_setup.dart
+docs/       Marketplace description and images
+sample/     a Flutter package with previews, used for the screenshots and for trying the plugin
+CHANGELOG.md   also becomes the plugin's change notes at build time
+PLAN.md        design notes and the decision to render headlessly instead of in a browser
 ```
 
 ## Development
@@ -224,6 +223,21 @@ FP_IT_PROJECT=/path/to/flutter/package ./gradlew test --rerun
 * `GenerateFileIntegrationTest` uses "Generate Flutter Preview…" to write new preview files, and to append to a copy
   of an existing one, then renders them. Its temporary `previews/**/zz_fp_check_*.dart` files are always deleted;
   the PNGs go to `build/generated-renders/`.
+
+### Screenshots
+
+`docs/images/screenshot-*.png` are captured by the plugin itself in a sandbox IDE with the sample project open. It
+paints the IDE window to PNGs, so it needs no screen-recording permission:
+
+```sh
+(cd sample && flutter pub get)
+./gradlew runIdeForScreenshots -PlocalIdePluginsDir="$HOME/Library/Application Support/Google/AndroidStudio2026.2/plugins"
+cp build/screenshots/screenshot-*.png docs/images/
+```
+
+`localIdePluginsDir` points at an IDE install that has the Dart plugin, which Android Studio doesn't bundle. The
+`render-*.png` images are the sample's `previews/showcase` previews, rendered by the plugin
+(`FP_IT_PROJECT=$PWD/sample ./gradlew test --rerun`, then copy them from `build/preview-renders/`).
 
 The build compiles against the local Android Studio install with a Java 25 toolchain (Android Studio's own JBR,
 configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plugin 2.x.
@@ -253,3 +267,18 @@ configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plug
 * A variant matrix: light and dark, text scales, device sizes, RTL and locales side by side
 * Click on the image to jump to the widget's source
 * A visual diff against a pinned baseline
+
+## License
+
+Flutter Preview is free software, licensed under the [GNU General Public License v3](LICENSE) with additional terms
+under section 7 (see [NOTICE](NOTICE)):
+
+* **Attribution:** copies and modified versions, including forks, must keep the notice
+  "Based on Flutter Preview by Jemsheer K D" with a link to this repository, in the NOTICE file, in their README, and
+  in the plugin description when distributed as a plugin.
+* Modified versions must be marked as modified, and may not use the name "Flutter Preview" or its icon as their own.
+
+Copyright (C) 2026 Jemsheer K D.
+
+Flutter Preview is an independent project. It is not affiliated with or endorsed by Google or the Flutter team.
+Flutter and the related logo are trademarks of Google LLC.

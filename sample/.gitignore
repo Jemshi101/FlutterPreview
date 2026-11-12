@@ -1,0 +1,9 @@
+.dart_tool/
+build/
+pubspec.lock
+.flutter-plugins-dependencies
+.idea/
+*.iml
+
+# Flutter Preview plugin: local preview setup (per developer)
+/.flutter_preview/

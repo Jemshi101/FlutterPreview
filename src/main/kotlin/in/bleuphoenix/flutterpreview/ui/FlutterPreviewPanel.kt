@@ -170,6 +170,16 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         if (service.panel === this) service.panel = null
     }
 
+    // Used by the screenshot mode (dev.ScreenshotRunner) to drive the panel.
+    internal fun isRenderComplete(): Boolean =
+        renderingPath == null && currentFile?.path?.let { states[it] }?.stale == false
+
+    internal fun selectByTitle(title: String) {
+        entries.firstOrNull { it.title == title }?.let(::select)
+    }
+
+    internal fun setGridMode(show: Boolean) = showGrid(show)
+
     /** From a gutter icon: show [file] and select its preview [key]. */
     fun reveal(file: VirtualFile, key: String) {
         showFile(file)

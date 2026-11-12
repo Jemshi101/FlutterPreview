@@ -1,0 +1,33 @@
+Flutter Preview
+Copyright (C) 2026 Jemsheer K D
+https://github.com/Jemshi101/FlutterPreview
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, version 3 of the License (see LICENSE), together
+with the additional terms below.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+
+ADDITIONAL TERMS UNDER SECTION 7 OF THE GNU GPL VERSION 3
+
+1. Author attribution (section 7(b)). You must preserve the following author attribution in all copies and
+   modified versions of this program, including forks, in source and object form:
+
+       Based on Flutter Preview by Jemsheer K D
+       https://github.com/Jemshi101/FlutterPreview
+
+   The attribution must appear:
+
+     (a) in this NOTICE file, which must be kept with the source code of any copy or modified version;
+     (b) in the README or other primary documentation of any modified version; and
+     (c) where a modified version is distributed as a plugin (for example on the JetBrains Marketplace or any
+         other plugin repository), in the plugin's description or "About" information shown to users.
+
+2. Origin (section 7(c)). Modified versions must not be presented as the original work, and must be marked in
+   reasonable ways as different from it.
+
+3. Name (section 7(e)). No rights are granted to use the name "Flutter Preview", or the plugin's icon, as the
+   product name or icon of a modified version without the copyright holder's permission.

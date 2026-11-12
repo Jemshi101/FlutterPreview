@@ -128,7 +128,20 @@ fp_td.ByteData? fpFakeReply(String channel, fp_td.ByteData? message) {
 bool fpReady = false;
 final List<String> fpSetupProblems = <String>[];
 
+/// flutter_test draws elevation as a hairline black outline instead of a shadow (`debugDisableShadows`), which
+/// keeps golden tests deterministic but makes cards and dialogs look wrong in a preview. Turn real shadows on for
+/// the render and restore the setting before the test ends, as flutter_test checks it.
 Future<void> fpRender(fp_t.WidgetTester tester, FpPreview preview) async {
+  final bool shadowsDisabled = fp_r.debugDisableShadows;
+  fp_r.debugDisableShadows = false;
+  try {
+    await fpRenderPreview(tester, preview);
+  } finally {
+    fp_r.debugDisableShadows = shadowsDisabled;
+  }
+}
+
+Future<void> fpRenderPreview(fp_t.WidgetTester tester, FpPreview preview) async {
   final List<String> problems = <String>[...fpSetupProblems];
   final List<String> notes = <String>[];
   fpStubbedChannels.clear();
