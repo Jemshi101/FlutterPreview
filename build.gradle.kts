@@ -39,6 +39,11 @@ intellijPlatform {
             local(providers.gradleProperty("androidStudioPath"))
         }
     }
+    // ./gradlew publishPlugin: uploads build/distributions/FlutterPreview-<version>.zip to the JetBrains Marketplace.
+    // The token comes from the environment only (https://plugins.jetbrains.com/author/me/tokens); never commit it.
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
     pluginConfiguration {
         description = providers.fileContents(layout.projectDirectory.file("docs/marketplace/description.html")).asText
         // Converted while configuring (a provider lambda calling a script function breaks the configuration cache);

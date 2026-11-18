@@ -239,6 +239,21 @@ cp build/screenshots/screenshot-*.png docs/images/
 `render-*.png` images are the sample's `previews/showcase` previews, rendered by the plugin
 (`FP_IT_PROJECT=$PWD/sample ./gradlew test --rerun`, then copy them from `build/preview-renders/`).
 
+### Releasing
+
+1. Bump `pluginVersion` in `gradle.properties` and add the version to `CHANGELOG.md` (the newest four versions become
+   the plugin's change notes).
+2. Check compatibility: `./gradlew verifyPlugin` (Android Studio 2026.2, IntelliJ IDEA 2026.2.3 and 2026.3).
+3. Upload to the JetBrains Marketplace with a token from <https://plugins.jetbrains.com/author/me/tokens>:
+
+   ```sh
+   export PUBLISH_TOKEN=perm-…   # e.g. in ~/.zshrc; never commit it
+   ./gradlew publishPlugin
+   ```
+
+   JetBrains reviews each update before it goes live.
+4. Tag the version and attach `build/distributions/FlutterPreview-<version>.zip` to a GitHub release.
+
 The build compiles against the local Android Studio install with a Java 25 toolchain (Android Studio's own JBR,
 configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plugin 2.x.
 
