@@ -8,6 +8,11 @@ version = providers.gradleProperty("pluginVersion").get()
 
 kotlin {
     jvmToolchain(25)
+    compilerOptions {
+        // Call the platform's Kotlin interface defaults directly instead of copying DefaultImpls bridges into our
+        // classes: the Plugin Verifier reports those bridges as uses of deprecated / experimental API.
+        jvmDefault = org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode.NO_COMPATIBILITY
+    }
 }
 
 repositories {
@@ -26,6 +31,14 @@ dependencies {
 
 intellijPlatform {
     buildSearchableOptions = false
+    // ./gradlew verifyPlugin: JetBrains' Plugin Verifier, as the Marketplace runs it.
+    pluginVerification {
+        ides {
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdea, "2026.2.3") // same platform build as Android Studio 2026.2
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdea, "2026.3")
+            local(providers.gradleProperty("androidStudioPath"))
+        }
+    }
     pluginConfiguration {
         description = providers.fileContents(layout.projectDirectory.file("docs/marketplace/description.html")).asText
         // Converted while configuring (a provider lambda calling a script function breaks the configuration cache);

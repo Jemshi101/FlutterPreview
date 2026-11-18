@@ -7,7 +7,7 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
-import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.EditorFactory
@@ -31,6 +31,7 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.DumbAwareToggleAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.util.Condition
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.vfs.VirtualFile
@@ -164,6 +165,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     override fun dispose() {
+        disposed = true
         runningIndicator.getAndSet(null)?.cancel()
         documentDisposable?.let(Disposer::dispose)
         val service = FlutterPreviewService.getInstance(project)
@@ -512,8 +514,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun navigate(entry: PreviewEntry) {
         val file = currentFile ?: return
-        // Swing events don't hold the write-intent lock that navigation needs.
-        WriteIntentReadAction.run(Runnable { OpenFileDescriptor(project, file, entry.offset).navigate(true) })
+        withWriteIntent { OpenFileDescriptor(project, file, entry.offset).navigate(true) }
     }
 
     // endregion
@@ -541,10 +542,20 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun openSetup(file: File) {
         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) ?: return
-        WriteIntentReadAction.run(Runnable { OpenFileDescriptor(project, virtualFile).navigate(true) })
+        withWriteIntent { OpenFileDescriptor(project, virtualFile).navigate(true) }
     }
 
     // endregion
+
+    @Volatile
+    private var disposed = false
+
+    /**
+     * Runs [action] with the write-intent lock that saving and navigation need. Swing events (list clicks, toolbar
+     * buttons) don't hold it; `invokeLater` does. Dropped if the panel or project is disposed in the meantime.
+     */
+    private fun withWriteIntent(action: () -> Unit) =
+        ApplicationManager.getApplication().invokeLater({ action() }, Condition<Any?> { disposed || project.isDisposed })
 
     // region Rendering
 
@@ -556,8 +567,14 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         if (renderable.isEmpty()) return
         ensureSetup(root)
 
-        // The harness is compiled from disk. Swing events don't hold the write-intent lock saving needs.
-        WriteIntentReadAction.run(Runnable { FileDocumentManager.getInstance().saveAllDocuments() })
+        // The harness is compiled from disk, so save first.
+        withWriteIntent {
+            FileDocumentManager.getInstance().saveAllDocuments()
+            startRender(file, root, renderable)
+        }
+    }
+
+    private fun startRender(file: VirtualFile, root: PubRoot, renderable: List<PreviewEntry>) {
         val environment = EnvironmentUtil.getEnvironmentMap()
         val sdk = FlutterSdkLocator.find(root, environment)
             ?: return setStatus("Flutter SDK not found. Run `flutter pub get` in ${root.dir.path}, or set FLUTTER_ROOT.", AllIcons.General.Error)

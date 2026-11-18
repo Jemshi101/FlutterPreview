@@ -8,7 +8,6 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
@@ -31,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.suspendCoroutine
 import java.awt.Component
 import java.awt.RenderingHints
 import java.awt.Window
@@ -119,10 +119,10 @@ private class ScreenshotRunner(private val project: Project, private val outDir:
         return frame
     }
 
-    private suspend fun openFile(path: String, caretText: String?) = onEdt {
+    private suspend fun openFile(path: String, caretText: String?) = onEdtWithWriteIntent {
         val file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(root, path))
             ?: error("Missing sample file $path")
-        WriteIntentReadAction.run(Runnable {
+        run {
             val offset = caretText?.let { text ->
                 val content = String(file.contentsToByteArray())
                 content.indexOf(text).takeIf { it >= 0 }?.plus(text.length - 3) // inside the class name
@@ -132,7 +132,7 @@ private class ScreenshotRunner(private val project: Project, private val outDir:
                 it.scrollToCaret(ScrollType.CENTER)
                 it.scrollHorizontally(0)
             }
-        })
+        }
     }
 
     private suspend fun showToolWindow(frame: JFrame): FlutterPreviewPanel {
@@ -222,6 +222,11 @@ private class ScreenshotRunner(private val project: Project, private val outDir:
     private suspend fun settle() = delay(1_500)
 
     private suspend fun <T> onEdt(block: () -> T): T = withContext(Dispatchers.EDT) { block() }
+
+    /** Like [onEdt], but through `invokeLater`, which holds the write-intent lock navigation needs. */
+    private suspend fun <T> onEdtWithWriteIntent(block: () -> T): T = suspendCoroutine { continuation ->
+        ApplicationManager.getApplication().invokeLater { continuation.resumeWith(runCatching(block)) }
+    }
 
     companion object {
         const val FRAME_WIDTH = 1500

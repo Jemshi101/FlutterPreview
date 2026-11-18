@@ -3,6 +3,12 @@
 All notable changes to Flutter Preview. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-11-13
+
+### Changed
+- No deprecated or experimental IntelliJ Platform APIs: the Plugin Verifier reports the plugin as compatible, with no
+  warnings, on Android Studio 2026.2 and IntelliJ IDEA 2026.2 and 2026.3.
+
 ## [0.6.1] - 2026-11-12
 
 ### Added
