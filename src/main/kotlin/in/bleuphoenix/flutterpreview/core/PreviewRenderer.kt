@@ -14,6 +14,8 @@ data class PreviewImage(
     val problems: List<String>,
     /** Harmless observations, e.g. "animation still running". */
     val notes: List<String>,
+    /** Failed accessibility guidelines: text contrast, tap target size, missing labels. */
+    val accessibility: List<String> = emptyList(),
 )
 
 /** The render of all previews of one file. */
@@ -94,6 +96,7 @@ class PreviewRenderer(
                     pixelRatio = Regex(""""pixelRatio"\s*:\s*([0-9.]+)""").find(json)?.groupValues?.get(1)?.toDoubleOrNull() ?: 2.0,
                     problems = stringArray(json, "problems"),
                     notes = stringArray(json, "notes"),
+                    accessibility = stringArray(json, "accessibility"),
                 )
             }.toMap()
             BatchResult(images, log.toString(), process.exitValue(), System.currentTimeMillis() - started)

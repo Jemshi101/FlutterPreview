@@ -91,7 +91,17 @@ private class ScreenshotRunner(private val project: Project, private val outDir:
             onEdt { capture(frame, "screenshot-grid.png") }
             onEdt { panel.setGridMode(false) }
 
-            // 3. Generate Flutter Preview… on a widget: capture the chooser, then cancel it (nothing is written).
+            // 3. Variant matrix of a preview with an accessibility issue, the dark variant selected.
+            onEdt { panel.selectByTitle("Settings tile") }
+            settle()
+            onEdt { panel.setVariantMode(true) }
+            waitForRender(panel)
+            onEdt { panel.selectVariantByLabel("Dark") }
+            settle()
+            onEdt { capture(frame, "screenshot-variants.png") }
+            onEdt { panel.setVariantMode(false) }
+
+            // 4. Generate Flutter Preview… on a widget: capture the chooser, then cancel it (nothing is written).
             //    The preview pane would only say "No @Preview in stat_tile.dart": give the editor the room.
             onEdt { ToolWindowManager.getInstance(project).getToolWindow(FlutterPreviewService.TOOL_WINDOW_ID)?.hide() }
             openFile("lib/widgets/stat_tile.dart", caretText = "class StatTile")

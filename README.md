@@ -12,9 +12,11 @@ of them in one run, and re-renders them when you save.
 
 ![The Flutter Preview tool window next to a Dart file with previews](docs/images/screenshot-single.png)
 
-| Grid view | Generate Flutter Preview… |
+| Grid view | Variant matrix with accessibility checks |
 |---|---|
-| ![Grid view of every preview in the file](docs/images/screenshot-grid.png) | ![Right-click a widget and choose where its preview goes](docs/images/screenshot-generate.png) |
+| ![Grid view of every preview in the file](docs/images/screenshot-grid.png) | ![One preview in light and dark, larger text, right-to-left and other widths, with an accessibility issue listed](docs/images/screenshot-variants.png) |
+
+![Right-click a widget and choose where its preview goes](docs/images/screenshot-generate.png)
 
 Want to try it first? The [`sample/`](sample) folder is a small Flutter package with ready-made previews.
 
@@ -38,6 +40,13 @@ fonts), real assets, and your theme or wrapper.
 * **Single view with zoom:** zoom in and out, 100 %, Fit All, Fit Width and Fit Height. ⌘/Ctrl + mouse wheel also
   zooms. The zoom setting is kept across re-renders.
 * **Grid view:** thumbnails of every preview in the file. Zoom changes the thumbnail size.
+* **Variant matrix:** the selected preview side by side as declared, in the other theme (light or dark), with
+  1.5× and 2× text, right-to-left, and at small-phone (320) and tablet (800) widths. The ⋮ menu next to it picks
+  which of these to show. The variants render in one short run, and each has its own problems and accessibility
+  results.
+* **Accessibility checks:** every render runs Flutter's accessibility guidelines (text contrast, 48×48 tap
+  targets, labels on tappable elements). Failures appear under the image, as a count in the preview list and as a
+  badge on grid thumbnails. Turn them off with the eye button.
 * **Copy Image / Save Image As…:** export the 2x PNG for MRs, tickets or docs.
 * **Editor integration** (needs the Dart plugin):
   * a gutter icon on every `@Preview`, which opens that preview,
@@ -285,12 +294,15 @@ configured in `gradle.properties`), Kotlin 2.4 and IntelliJ Platform Gradle Plug
   that pull in a large part of the app. This is deliberate: nothing stays running between renders, so the ~1 GB the
   Dart compiler and the test engine use is released as soon as a render finishes.
 * Previews are images: you can't tap or scroll them.
+* The variant matrix varies the preview's `ThemeData` brightness and `MediaQuery`. A `wrapper:` that installs its own
+  fixed `Theme` keeps that theme in the light/dark variant.
+* Accessibility checks cover what Flutter's guidelines check; they don't replace testing with TalkBack or VoiceOver.
 * Subclasses of `Preview` (MultiPreview) and `Preview` arguments other than those listed above aren't supported
   yet.
 
 ## Roadmap
 
-* A variant matrix: light and dark, text scales, device sizes, RTL and locales side by side
+* Locales in the variant matrix
 * Click on the image to jump to the widget's source
 * A visual diff against a pinned baseline
 

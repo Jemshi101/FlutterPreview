@@ -15,10 +15,13 @@ import 'package:flutter_test/flutter_test.dart' as fp_t;
 const double fpPixelRatio = /*FP:PIXEL_RATIO*/;
 const double fpDefaultWidth = /*FP:DEFAULT_WIDTH*/;
 const double fpDefaultHeight = /*FP:DEFAULT_HEIGHT*/;
+const bool fpAccessibility = /*FP:ACCESSIBILITY*/;
 
 /// One preview. [size], [textScale] and [brightness] are the annotation's own expressions, evaluated here.
+/// A variant of the matrix may also set [rtl] and a [device] size.
 class FpPreview {
-  FpPreview(this.id, this.build, this.size, double? textScale, fp_ui.Brightness? brightness)
+  FpPreview(this.id, this.build, this.size, double? textScale, fp_ui.Brightness? brightness,
+      {this.rtl = false, this.device})
       : textScale = textScale ?? 1.0,
         brightness = brightness ?? fp_ui.Brightness.light;
 
@@ -27,11 +30,20 @@ class FpPreview {
   final fp_ui.Size? size;
   final double textScale;
   final fp_ui.Brightness brightness;
+  final bool rtl;
+  final fp_ui.Size? device;
 
   /// An infinite dimension in `size:` means "not fixed" for that dimension.
-  double get width => size != null && size!.width.isFinite ? size!.width : fpDefaultWidth;
-  double get height => size != null && size!.height.isFinite ? size!.height : fpDefaultHeight;
-  bool get fixedHeight => size != null && size!.height.isFinite;
+  double get _width => size != null && size!.width.isFinite ? size!.width : fpDefaultWidth;
+  double get _height => size != null && size!.height.isFinite ? size!.height : fpDefaultHeight;
+  bool get _fixedHeight => size != null && size!.height.isFinite;
+
+  /// A page-sized preview takes the device's height too; a component keeps its own.
+  bool get _pageSized => _fixedHeight && _height >= 500;
+
+  double get width => device?.width ?? _width;
+  double get height => device != null && _pageSized ? device!.height : _height;
+  bool get fixedHeight => _fixedHeight;
 }
 
 final List<FpPreview> fpPreviews = <FpPreview>[
@@ -125,6 +137,77 @@ fp_td.ByteData? fpFakeReply(String channel, fp_td.ByteData? message) {
   return null;
 }
 
+/// Flutter's accessibility guidelines, as in `expect(tester, meetsGuideline(...))`, reported instead of failing.
+Future<List<String>> fpCheckAccessibility(fp_t.WidgetTester tester) async {
+  final List<String> issues = <String>[];
+  for (final fp_t.AccessibilityGuideline guideline in <fp_t.AccessibilityGuideline>[
+    fp_t.textContrastGuideline,
+    fp_t.androidTapTargetGuideline,
+    fp_t.labeledTapTargetGuideline,
+  ]) {
+    try {
+      final fp_t.Evaluation result = await guideline.evaluate(tester);
+      if (!result.passed) issues.addAll(fpDescribeFailures(result.reason ?? guideline.description));
+    } catch (e) {
+      issues.add('${guideline.description}: the check failed ($e)');
+    }
+  }
+  return issues;
+}
+
+/// The guidelines name each failing node by its full `SemanticsNode` dump: keep its label and position, plus the
+/// first line of the reason ("expected tap target size of at least …").
+List<String> fpDescribeFailures(String reason) {
+  final List<String> out = <String>[];
+  for (final String part in reason.split(RegExp(r'\n(?=SemanticsNode#)'))) {
+    String text = part.trim();
+    if (text.isEmpty) continue;
+    if (text.startsWith('SemanticsNode#')) {
+      final int open = text.indexOf('(');
+      int depth = 0;
+      int end = -1;
+      for (int i = open; open >= 0 && i < text.length; i++) {
+        if (text[i] == '(') depth++;
+        if (text[i] == ')' && --depth == 0) {
+          end = i;
+          break;
+        }
+      }
+      if (end > 0) {
+        final String dump = text.substring(open + 1, end);
+        final RegExpMatch? label = RegExp(r'label: "((?:[^"\\]|\\.)*)"').firstMatch(dump);
+        final RegExpMatch? rect = RegExp(r'Rect\.fromLTRB\(([^)]*)\)').firstMatch(dump);
+        String size = '';
+        if (rect != null) {
+          final List<double> v = rect.group(1)!.split(',').map((String n) => double.tryParse(n.trim()) ?? 0).toList();
+          if (v.length == 4) size = ' (${(v[2] - v[0]).round()}×${(v[3] - v[1]).round()})';
+        }
+        final String kind = fpSemanticsKind(dump);
+        final String subject = label == null || label.group(1)!.isEmpty ? 'Unlabelled $kind' : '$kind "${label.group(1)}"';
+        final String rest = text.substring(end + 1).replaceFirst(RegExp(r'^:\s*'), '');
+        text = '$subject$size: ${rest.split('\n').firstWhere((String l) => l.trim().isNotEmpty, orElse: () => '').trim()}';
+      }
+    }
+    if (text.length > 400) text = '${text.substring(0, 400)}…';
+    out.add(text);
+  }
+  return out;
+}
+
+/// What a semantics node is, from the flags in its dump.
+String fpSemanticsKind(String dump) {
+  if (dump.contains('isTextField')) return 'text field';
+  if (dump.contains('hasToggledState')) return 'switch';
+  if (dump.contains('hasCheckedState')) return dump.contains('isInMutuallyExclusiveGroup') ? 'radio button' : 'checkbox';
+  if (dump.contains('isSlider')) return 'slider';
+  if (dump.contains('isLink')) return 'link';
+  if (dump.contains('isButton')) return 'button';
+  if (dump.contains('isImage')) return 'image';
+  if (dump.contains('isHeader')) return 'heading';
+  if (dump.contains('actions: [') && dump.contains('tap')) return 'tappable element';
+  return 'element';
+}
+
 bool fpReady = false;
 final List<String> fpSetupProblems = <String>[];
 
@@ -144,6 +227,7 @@ Future<void> fpRender(fp_t.WidgetTester tester, FpPreview preview) async {
 Future<void> fpRenderPreview(fp_t.WidgetTester tester, FpPreview preview) async {
   final List<String> problems = <String>[...fpSetupProblems];
   final List<String> notes = <String>[];
+  List<String> accessibility = <String>[];
   fpStubbedChannels.clear();
   fpStubNativeChannels(tester);
   if (!fpReady) {
@@ -159,24 +243,66 @@ Future<void> fpRenderPreview(fp_t.WidgetTester tester, FpPreview preview) async 
   tester.view.devicePixelRatio = fpPixelRatio;
   tester.view.physicalSize = fp_ui.Size(preview.width * fpPixelRatio, preview.height * fpPixelRatio);
   fp_t.addTearDown(tester.view.reset);
+  final fp_r.SemanticsHandle? semantics = fpAccessibility ? tester.ensureSemantics() : null;
+  try {
+    accessibility = await fpPumpAndCheck(tester, preview, problems, notes);
+  } finally {
+    semantics?.dispose();
+  }
 
-  final fp_m.GlobalKey boundaryKey = fp_m.GlobalKey();
+  await tester.runAsync(() async {
+    final fp_r.RenderRepaintBoundary boundary =
+        fpBoundaryKey.currentContext!.findRenderObject()! as fp_r.RenderRepaintBoundary;
+    final fp_ui.Image image = await boundary.toImage(pixelRatio: fpPixelRatio);
+    final fp_td.ByteData? png = await image.toByteData(format: fp_ui.ImageByteFormat.png);
+    final String out = '${fp_io.Platform.environment['FP_OUT_DIR']!}/${preview.id}.png';
+    fp_io.File(out).writeAsBytesSync(png!.buffer.asUint8List());
+    fp_io.File('$out.json').writeAsStringSync(
+      fp_convert.jsonEncode(<String, Object>{
+        'width': image.width,
+        'height': image.height,
+        'pixelRatio': fpPixelRatio,
+        'problems': problems,
+        'notes': notes,
+        'accessibility': accessibility,
+      }),
+    );
+  });
+}
+
+final fp_m.GlobalKey fpBoundaryKey = fp_m.GlobalKey();
+
+/// Pumps the preview until it settles, collects errors and notes, and returns the accessibility issues.
+Future<List<String>> fpPumpAndCheck(
+  fp_t.WidgetTester tester,
+  FpPreview preview,
+  List<String> problems,
+  List<String> notes,
+) async {
+
+  final fp_m.GlobalKey boundaryKey = fpBoundaryKey;
   await tester.pumpWidget(
     fp_m.MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: fp_m.ThemeData(brightness: preview.brightness),
       home: fp_m.Builder(
         builder: (fp_m.BuildContext context) => fp_m.MediaQuery(
-          data: fp_m.MediaQuery.of(context).copyWith(textScaler: fp_m.TextScaler.linear(preview.textScale)),
-          child: fp_m.Align(
-            alignment: fp_m.Alignment.topLeft,
-            child: fp_m.RepaintBoundary(
-              key: boundaryKey,
-              child: fp_m.Material(
-                child: fp_m.SizedBox(
-                  width: preview.width,
-                  height: preview.fixedHeight ? preview.height : null,
-                  child: fp_m.Builder(builder: (_) => preview.build()),
+          data: fp_m.MediaQuery.of(context).copyWith(
+            textScaler: fp_m.TextScaler.linear(preview.textScale),
+            platformBrightness: preview.brightness,
+          ),
+          child: fp_m.Directionality(
+            textDirection: preview.rtl ? fp_m.TextDirection.rtl : fp_m.TextDirection.ltr,
+            child: fp_m.Align(
+              alignment: fp_m.AlignmentDirectional.topStart,
+              child: fp_m.RepaintBoundary(
+                key: boundaryKey,
+                child: fp_m.Material(
+                  child: fp_m.SizedBox(
+                    width: preview.width,
+                    height: preview.fixedHeight ? preview.height : null,
+                    child: fp_m.Builder(builder: (_) => preview.build()),
+                  ),
                 ),
               ),
             ),
@@ -215,24 +341,7 @@ Future<void> fpRenderPreview(fp_t.WidgetTester tester, FpPreview preview) async 
   }
   fpTakeErrors(tester, problems);
   if (fpStubbedChannels.isNotEmpty) notes.add('native calls stubbed: ${fpStubbedChannels.join(', ')}');
-
-  await tester.runAsync(() async {
-    final fp_r.RenderRepaintBoundary boundary =
-        boundaryKey.currentContext!.findRenderObject()! as fp_r.RenderRepaintBoundary;
-    final fp_ui.Image image = await boundary.toImage(pixelRatio: fpPixelRatio);
-    final fp_td.ByteData? png = await image.toByteData(format: fp_ui.ImageByteFormat.png);
-    final String out = '${fp_io.Platform.environment['FP_OUT_DIR']!}/${preview.id}.png';
-    fp_io.File(out).writeAsBytesSync(png!.buffer.asUint8List());
-    fp_io.File('$out.json').writeAsStringSync(
-      fp_convert.jsonEncode(<String, Object>{
-        'width': image.width,
-        'height': image.height,
-        'pixelRatio': fpPixelRatio,
-        'problems': problems,
-        'notes': notes,
-      }),
-    );
-  });
+  return fpAccessibility ? fpCheckAccessibility(tester) : <String>[];
 }
 
 void main() {

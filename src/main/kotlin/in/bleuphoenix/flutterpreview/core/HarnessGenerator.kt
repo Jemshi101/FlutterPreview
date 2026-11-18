@@ -6,6 +6,8 @@ data class RenderOptions(
     val defaultWidth: Double = 400.0,
     val defaultHeight: Double = 800.0,
     val pixelRatio: Double = 2.0,
+    /** Run Flutter's accessibility guidelines (text contrast, tap target size, labels) on every render. */
+    val accessibility: Boolean = true,
 )
 
 /** Generated `flutter test` source plus the test id given to each preview (id → [PreviewEntry.key]). */
@@ -28,16 +30,21 @@ object HarnessGenerator {
         HarnessGenerator::class.java.getResource("/templates/preview_harness.dart")!!.readText()
     }
 
-    /** Renders [entries] (those without an invocation are skipped). */
+    /**
+     * Renders [entries] (those without an invocation are skipped), plus the [variants] of one preview. Variant
+     * images are stored under [PreviewVariants.imageKey].
+     */
     fun generate(
         root: PubRoot,
         sourceFile: File,
         sourceText: String,
         entries: List<PreviewEntry>,
         options: RenderOptions = RenderOptions(),
+        variants: VariantRequest? = null,
     ): Harness {
         val renderable = entries.filter { it.invocation != null }
-        require(renderable.isNotEmpty()) { "No previews to render" }
+        val variantEntry = variants?.entry?.takeIf { it.invocation != null }
+        require(renderable.isNotEmpty() || variantEntry != null) { "No previews to render" }
         val library = libraryOf(sourceFile, sourceText)
         val libraryText = if (library == sourceFile) sourceText else library.readText()
         val imports = buildList {
@@ -49,10 +56,11 @@ object HarnessGenerator {
         val previews = renderable.mapIndexed { index, entry ->
             val id = "p$index"
             ids[id] = entry.key
-            val build = entry.wrapper?.let { "${it}(${entry.invocation})" } ?: entry.invocation!!
-            // Argument expressions go into Dart as written, so constants and getters resolve like in the source.
-            "  FpPreview('$id', () => $build, ${entry.sizeExpression ?: "null"}, " +
-                "${entry.textScaleExpression ?: "null"}, ${entry.brightness ?: "null"}),"
+            preview(id, entry, null)
+        } + (variantEntry?.let { entry -> variants.variants.map { entry to it } }.orEmpty()).mapIndexed { index, (entry, variant) ->
+            val id = "v$index"
+            ids[id] = PreviewVariants.imageKey(entry.key, variant.id)
+            preview(id, entry, variant)
         }
 
         val setup = File(root.dir, SETUP_FILE).isFile
@@ -60,6 +68,7 @@ object HarnessGenerator {
             "SETUP_IMPORT" to if (setup) "import '${root.importUri(File(root.dir, SETUP_FILE))}' as fp_setup;" else "",
             "SOURCE_IMPORTS" to imports.joinToString("\n"),
             "PIXEL_RATIO" to dart(options.pixelRatio),
+            "ACCESSIBILITY" to options.accessibility.toString(),
             "DEFAULT_WIDTH" to dart(options.defaultWidth),
             "DEFAULT_HEIGHT" to dart(options.defaultHeight),
             "PREVIEWS" to previews.joinToString("\n"),
@@ -67,6 +76,18 @@ object HarnessGenerator {
         )
         val code = values.entries.fold(template) { text, (key, value) -> text.replace("/*FP:$key*/", value) }
         return Harness(code, ids)
+    }
+
+    /** One `FpPreview(...)` line. Argument expressions go into Dart as written, so constants resolve like in the source. */
+    private fun preview(id: String, entry: PreviewEntry, variant: PreviewVariant?): String {
+        val build = entry.wrapper?.let { "${it}(${entry.invocation})" } ?: entry.invocation!!
+        val textScale = variant?.textScale?.let(::dart) ?: entry.textScaleExpression ?: "null"
+        val brightness = variant?.brightness ?: entry.brightness ?: "null"
+        val extras = buildList {
+            if (variant?.rtl == true) add("rtl: true")
+            variant?.device?.let { (w, h) -> add("device: fp_ui.Size(${dart(w)}, ${dart(h)})") }
+        }.joinToString("") { ", $it" }
+        return "  FpPreview('$id', () => $build, ${entry.sizeExpression ?: "null"}, $textScale, $brightness$extras),"
     }
 
     /** A `part of` file can't be imported: use the library it belongs to. */

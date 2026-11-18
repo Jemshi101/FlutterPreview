@@ -44,12 +44,40 @@ class RenderIntegrationTest {
                 val image = result.images[entry.key]
                 println("   ${entry.title}: ${if (image == null) "MISSING" else "ok"}, problems ${image?.problems?.size}, notes ${image?.notes}")
                 image?.problems?.forEach { println("      problem: ${it.lineSequence().first()}") }
+                image?.accessibility?.forEach { println("      accessibility: $it") }
                 image?.let { File(outDir, "${entry.title.replace(Regex("[^\\w-]+"), "_")}.png").writeBytes(it.png) }
             }
             assertEquals("Missing renders in ${file.name}", entries.size, result.images.size)
             rendered += entries.size
         }
         assertTrue("No previews found", rendered > 0)
+    }
+
+    @Test
+    fun `renders the variant matrix of a preview`() {
+        val projectPath = System.getenv("FP_IT_PROJECT").orEmpty()
+        assumeTrue("FP_IT_PROJECT not set", projectPath.isNotEmpty())
+
+        val root = PubRoot.find(File(projectPath, "pubspec.yaml"))!!
+        val renderer = PreviewRenderer(FlutterSdkLocator.find(root, System.getenv())!!)
+        val outDir = File("build/variant-renders").apply { deleteRecursively(); mkdirs() }
+        val file = root.dir.walkTopDown()
+            .onEnter { it == root.dir || (it.name !in setOf(".dart_tool", "build") && !it.name.startsWith(".")) }
+            .first { it.extension == "dart" && PreviewParser.parse(it.readText()).any { e -> e.invocation != null } }
+        val text = file.readText()
+        val entry = PreviewParser.parse(text).first { it.invocation != null }
+        val variants = PreviewVariants.forEntry(entry, PreviewVariants.DEFAULT_DIMENSIONS)
+
+        // Variants only, as when switching to a preview whose variants aren't cached.
+        val result = renderer.render(root, HarnessGenerator.generate(root, file, text, emptyList(), variants = VariantRequest(entry, variants)))
+        println("${file.name} / ${entry.title}: ${variants.size} variants -> exit ${result.exitCode}, ${result.millis} ms")
+        for (variant in variants) {
+            val image = result.images[PreviewVariants.imageKey(entry.key, variant.id)]
+            println("   ${variant.label}: ${if (image == null) "MISSING" else "ok"}, problems ${image?.problems?.size}, accessibility ${image?.accessibility?.size}")
+            image?.let { File(outDir, "${variant.id}.png").writeBytes(it.png) }
+        }
+        if (result.images.size != variants.size) println(result.log)
+        assertEquals(variants.size, result.images.size)
     }
 }
 

@@ -60,6 +60,10 @@ import `in`.bleuphoenix.flutterpreview.core.PreviewParser
 import `in`.bleuphoenix.flutterpreview.core.PreviewRenderer
 import `in`.bleuphoenix.flutterpreview.core.PubRoot
 import `in`.bleuphoenix.flutterpreview.core.RenderCancelledException
+import `in`.bleuphoenix.flutterpreview.core.RenderOptions
+import `in`.bleuphoenix.flutterpreview.core.PreviewVariants
+import `in`.bleuphoenix.flutterpreview.core.VariantDimension
+import `in`.bleuphoenix.flutterpreview.core.VariantRequest
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.event.MouseEvent
@@ -78,7 +82,7 @@ import kotlin.math.roundToInt
 
 /**
  * Tool window content in two columns: the `@Preview` entries of the focused Dart file on the left, the
- * selected preview (or a grid of all of them) on the right.
+ * selected preview (or a grid of all of them, or the variant matrix of the selected one) on the right.
  *
  * All previews of a file render in one `flutter test` run and are cached per file, so selecting a
  * preview is instant. Focusing a file renders it if needed; saving a Dart file of the package
@@ -95,6 +99,11 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         var exitCode = 0
         /** The latest render produced nothing (usually code that doesn't compile mid-edit); [images] are older. */
         var lastFailed = false
+        /** Variant matrix renders: preview key → variant id → image. */
+        val variants = mutableMapOf<String, Map<String, CachedPreview>>()
+        /** Previews whose variants were rendered (or attempted) since the last save. */
+        val freshVariants = mutableSetOf<String>()
+        var variantMillis = 0L
     }
 
     private val listModel = DefaultListModel<PreviewEntry>()
@@ -105,7 +114,11 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     private val image = PreviewImageComponent()
     private val grid: PreviewGridPanel
     private val logArea = textArea()
-    private val problemsArea = textArea().apply { foreground = JBColor.RED }
+    private val problemsArea = textArea().apply {
+        foreground = JBColor.RED
+        lineWrap = true
+        wrapStyleWord = true
+    }
     private val problemsPane = JBScrollPane(problemsArea).apply {
         preferredSize = JBUI.size(100, 110)
         isVisible = false
@@ -121,6 +134,12 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     private var updatingList = false
     private var renderOnSave = true
     private var gridMode = false
+    private var variantMode = false
+    private var variantDimensions = PreviewVariants.DEFAULT_DIMENSIONS
+    private var selectedVariantId = PreviewVariants.BASE_ID
+    private var accessibilityChecks = true
+    /** The right column shows thumbnails: all previews, or the variants of the selected one. */
+    private val showingGrid get() = gridMode || variantMode
     private var showingLog = false
     /** The log was opened by a failed render, not by the user: close it again once a render succeeds. */
     private var logShownForFailure = false
@@ -131,6 +150,8 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     }
     private var renderingPath: String? = null
     private var renderingCount = 0
+    /** Key of the preview whose variants the running render includes. */
+    private var renderingVariantsOf: String? = null
 
     private val renderGeneration = AtomicInteger()
     private val runningIndicator = AtomicReference<ProgressIndicator?>()
@@ -138,6 +159,8 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     private val saveAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
     private val typingAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
     private val caretAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    /** Moving through the list (or the caret through the file) shouldn't start a variant run per preview passed. */
+    private val variantAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
 
     private val imageActions = DefaultActionGroup().apply {
         add(action("Copy Image", "Copy the preview to the clipboard", AllIcons.Actions.Copy, enabled = { selectedImage() != null }) {
@@ -145,7 +168,8 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         })
         add(action("Save Image As…", "Save the preview as a PNG file", AllIcons.Actions.MenuSaveall, enabled = { selectedImage() != null }) {
             val entry = list.selectedValue ?: return@action
-            selectedImage()?.let { PreviewImages.save(project, it, entry.title) }
+            val variant = variantsOfSelected().firstOrNull { variantMode && it.id == selectedVariantId && it.id != PreviewVariants.BASE_ID }
+            selectedImage()?.let { PreviewImages.save(project, it, listOfNotNull(entry.title, variant?.label).joinToString(" - ")) }
         })
         add(action("Go to Source", "Open the preview declaration", AllIcons.Actions.EditSource, enabled = { list.selectedValue != null }) {
             list.selectedValue?.let(::navigate)
@@ -153,7 +177,16 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     init {
-        grid = PreviewGridPanel(onSelect = ::select, onOpen = { showGrid(false); select(it) }, popup = imageActions)
+        grid = PreviewGridPanel(
+            onSelect = { key -> if (variantMode) selectVariant(key) else entries.firstOrNull { it.key == key }?.let(::select) },
+            onOpen = { key ->
+                if (!variantMode) {
+                    showGrid(false)
+                    entries.firstOrNull { it.key == key }?.let(::select)
+                }
+            },
+            popup = imageActions,
+        )
         setToolbar(createToolbar())
         setContent(createContent())
         installList()
@@ -173,8 +206,17 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     // Used by the screenshot mode (dev.ScreenshotRunner) to drive the panel.
-    internal fun isRenderComplete(): Boolean =
-        renderingPath == null && currentFile?.path?.let { states[it] }?.stale == false
+    internal fun isRenderComplete(): Boolean {
+        val state = currentFile?.path?.let { states[it] } ?: return false
+        val variantsDone = !variantMode || list.selectedValue?.key?.let { it in state.freshVariants } == true
+        return renderingPath == null && !state.stale && variantsDone
+    }
+
+    internal fun setVariantMode(show: Boolean) = showVariants(show)
+
+    internal fun selectVariantByLabel(label: String) {
+        variantsOfSelected().firstOrNull { it.label == label }?.let { selectVariant(it.id) }
+    }
 
     internal fun selectByTitle(title: String) {
         entries.firstOrNull { it.title == title }?.let(::select)
@@ -192,6 +234,16 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun createToolbar(): JPanel {
         val gridIcon = IconLoader.getIcon("/icons/grid.svg", FlutterPreviewPanel::class.java)
+        val variantsIcon = IconLoader.getIcon("/icons/variants.svg", FlutterPreviewPanel::class.java)
+        val dimensions = DefaultActionGroup("Variant Options", true).apply {
+            templatePresentation.icon = AllIcons.Actions.More
+            templatePresentation.description = "Choose what the variant matrix varies"
+            VariantDimension.entries.forEach { dimension ->
+                add(toggle(dimension.label, dimension.label, null,
+                    get = { dimension in variantDimensions },
+                    set = { on -> setVariantDimensions(if (on) variantDimensions + dimension else variantDimensions - dimension) }))
+            }
+        }
         val group = DefaultActionGroup().apply {
             add(action("Render", "Render all previews of this file again", AllIcons.Actions.Refresh) {
                 reparse()
@@ -202,6 +254,11 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             })
             addSeparator()
             add(toggle("Grid", "Show all previews of the file as thumbnails", gridIcon, get = { gridMode }, set = ::showGrid))
+            add(toggle("Variants", "Show the selected preview in light and dark, with larger text, right-to-left and at other widths",
+                variantsIcon, get = { variantMode }, set = ::showVariants))
+            add(dimensions)
+            add(toggle("Accessibility Checks", "Check text contrast, tap target size and labels on every render",
+                AllIcons.General.InspectionsEye, get = { accessibilityChecks }, set = ::setAccessibilityChecks))
             add(toggle("Render on Save", "Re-render when a Dart file of the package is saved", AllIcons.Actions.Lightning,
                 get = { renderOnSave }, set = { renderOnSave = it }))
             add(action("Edit Preview Setup", "Open .flutter_preview/setup.dart: local setup run before previews render",
@@ -254,20 +311,20 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         val fitHeightIcon = IconLoader.getIcon("/icons/fitHeight.svg", FlutterPreviewPanel::class.java)
         fun fit(text: String, icon: Icon, mode: PreviewImageComponent.Mode) = toggle(
             text, text, icon,
-            get = { !gridMode && image.mode == mode },
+            get = { !showingGrid && image.mode == mode },
             set = { image.setMode(if (it) mode else PreviewImageComponent.Mode.CUSTOM) },
-            enabled = { !gridMode },
+            enabled = { !showingGrid },
         )
         val group = DefaultActionGroup().apply {
             add(action("Zoom Out", "Zoom out (⌘/Ctrl + wheel)", AllIcons.General.ZoomOut) {
-                if (gridMode) grid.zoomOut() else image.zoomOut()
+                if (showingGrid) grid.zoomOut() else image.zoomOut()
                 updateZoomLabel()
             })
             add(action("Zoom In", "Zoom in (⌘/Ctrl + wheel)", AllIcons.General.ZoomIn) {
-                if (gridMode) grid.zoomIn() else image.zoomIn()
+                if (showingGrid) grid.zoomIn() else image.zoomIn()
                 updateZoomLabel()
             })
-            add(action("Actual Size", "Show at 100 %", AllIcons.General.ActualZoom, enabled = { !gridMode }) { image.actualSize() })
+            add(action("Actual Size", "Show at 100 %", AllIcons.General.ActualZoom, enabled = { !showingGrid }) { image.actualSize() })
             addSeparator()
             add(fit("Fit All", AllIcons.General.FitContent, PreviewImageComponent.Mode.FIT_ALL))
             add(fit("Fit Width", fitWidthIcon, PreviewImageComponent.Mode.FIT_WIDTH))
@@ -291,8 +348,15 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             override fun customizeCellRenderer(
                 list: JList<out PreviewEntry>, value: PreviewEntry, index: Int, selected: Boolean, hasFocus: Boolean,
             ) {
-                icon = if (value.problem != null) AllIcons.General.Warning else AllIcons.Actions.Preview
+                val rendered = currentFile?.path?.let { states[it] }?.images?.get(value.key)
+                icon = when {
+                    value.problem != null || rendered?.problems?.isNotEmpty() == true -> AllIcons.General.Warning
+                    else -> AllIcons.Actions.Preview
+                }
                 append(value.title, if (value.problem != null) SimpleTextAttributes.ERROR_ATTRIBUTES else SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                rendered?.accessibility?.size?.takeIf { it > 0 }?.let {
+                    append("  $it accessibility issue${if (it == 1) "" else "s"}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+                }
                 toolTipText = listOfNotNull(value.group, "${value.declaration} · line ${value.line}", value.problem)
                     .joinToString("<br>", "<html>", "</html>")
             }
@@ -302,7 +366,12 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             refreshView()
             // Nothing cached and nothing running for this file (e.g. render on save is off): render now.
             val path = currentFile?.path
-            if (list.selectedValue != null && path != null && states[path] == null && renderingPath != path) renderFile()
+            if (variantMode) {
+                variantAlarm.cancelAllRequests()
+                variantAlarm.addRequest(::ensureVariants, 400)
+            } else if (list.selectedValue != null && path != null && states[path] == null && renderingPath != path) {
+                renderFile()
+            }
         }
         object : DoubleClickListener() {
             override fun onDoubleClick(event: MouseEvent): Boolean {
@@ -323,8 +392,51 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun showGrid(show: Boolean) {
         gridMode = show
+        if (show) variantMode = false
         refreshView()
     }
+
+    private fun showVariants(show: Boolean) {
+        variantMode = show
+        if (show) gridMode = false
+        selectedVariantId = PreviewVariants.BASE_ID
+        refreshView()
+        ensureVariants()
+    }
+
+    private fun selectVariant(id: String) {
+        selectedVariantId = id
+        refreshView()
+    }
+
+    private fun setVariantDimensions(dimensions: Set<VariantDimension>) {
+        variantDimensions = dimensions
+        states.values.forEach { it.variants.clear(); it.freshVariants.clear() }
+        if (selectedVariantId != PreviewVariants.BASE_ID) selectedVariantId = PreviewVariants.BASE_ID
+        refreshView()
+        ensureVariants()
+    }
+
+    private fun setAccessibilityChecks(on: Boolean) {
+        accessibilityChecks = on
+        states.values.forEach { it.stale = true; it.freshVariants.clear() }
+        refreshView()
+        renderFile()
+    }
+
+    /** In variant mode: renders the selected preview's variants unless they're cached or already on their way. */
+    private fun ensureVariants() {
+        if (!variantMode) return
+        val entry = list.selectedValue?.takeIf { it.invocation != null } ?: return
+        val path = currentFile?.path ?: return
+        if (renderingPath == path) return // asked again when that render finishes
+        val state = states[path]
+        if (state != null && entry.key in state.freshVariants) return
+        renderFile(variantsOnly = state != null && !state.stale)
+    }
+
+    private fun variantsOfSelected() =
+        list.selectedValue?.let { PreviewVariants.forEntry(it, variantDimensions) }.orEmpty()
 
     private fun updateEmptyText() {
         list.emptyText.text = when {
@@ -335,39 +447,83 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     private fun updateZoomLabel() {
-        zoomLabel.text = if (gridMode) "" else "${(image.scale() * 100).roundToInt()}%"
+        zoomLabel.text = if (gridMode || variantMode) "" else "${(image.scale() * 100).roundToInt()}%"
     }
 
     private fun selectedImage(): CachedPreview? {
         val key = list.selectedValue?.key ?: return null
-        return currentFile?.path?.let { states[it] }?.images?.get(key)
+        val state = currentFile?.path?.let { states[it] } ?: return null
+        return if (variantMode) state.variants[key]?.get(selectedVariantId) else state.images[key]
     }
 
     /** Re-draws the right column from the cache. Never renders. */
     private fun refreshView() {
         val state = currentFile?.path?.let { states[it] }
         val selected = list.selectedValue
-        val cached = selected?.let { state?.images?.get(it.key) }
         val renderingThis = renderingPath != null && renderingPath == currentFile?.path
+        if (variantMode && variantsOfSelected().none { it.id == selectedVariantId }) selectedVariantId = PreviewVariants.BASE_ID
+        val cached = selectedImage()
 
         image.setImage(cached?.image, cached?.pixelRatio ?: 2.0)
-        val pending = when {
-            renderingThis -> "Rendering…"
-            state != null && !state.stale -> "Failed to render — see the log"
-            else -> ""
+        if (variantMode) {
+            val variants = variantsOfSelected()
+            val images = selected?.let { state?.variants?.get(it.key) }.orEmpty()
+            val pending = when {
+                selected == null -> ""
+                selected.problem != null -> selected.problem
+                renderingThis && renderingVariantsOf == selected.key -> "Rendering…"
+                state != null && selected.key in state.freshVariants -> "Failed to render — see the log"
+                else -> ""
+            }
+            grid.setItems(variants.map { GridItem(it.id, it.label, images[it.id], pending) }, selectedVariantId)
+        } else {
+            val pending = when {
+                renderingThis -> "Rendering…"
+                state != null && !state.stale -> "Failed to render — see the log"
+                else -> ""
+            }
+            val images = state?.images.orEmpty()
+            grid.setItems(entries.map { GridItem(it.key, it.title, images[it.key], it.problem ?: pending) }, selected?.key)
         }
-        grid.setItems(entries, state?.images.orEmpty(), selected?.key, pending)
         logArea.text = state?.log.orEmpty()
         logArea.caretPosition = 0
-        setProblems(if (gridMode) emptyList() else cached?.problems.orEmpty())
+        setProblems(if (gridMode) null else cached)
         cards.show(cardPanel, when {
             showingLog -> CARD_LOG
-            gridMode -> CARD_GRID
+            gridMode || variantMode -> CARD_GRID
             else -> CARD_IMAGE
         })
+        list.repaint()
         updateZoomLabel()
-        updateStatus(state, selected, cached, renderingThis)
+        if (variantMode) updateVariantStatus(state, selected, cached, renderingThis) else updateStatus(state, selected, cached, renderingThis)
     }
+
+    private fun updateVariantStatus(state: FileState?, selected: PreviewEntry?, cached: CachedPreview?, rendering: Boolean) {
+        val variants = variantsOfSelected()
+        val label = variants.firstOrNull { it.id == selectedVariantId }?.label
+        val images = selected?.let { state?.variants?.get(it.key) }.orEmpty()
+        when {
+            currentFile == null || entries.isEmpty() -> setStatus("", null)
+            selected == null -> setStatus("Select a preview to see its variants", null)
+            selected.problem != null -> setStatus(selected.problem, AllIcons.General.Warning)
+            rendering && renderingVariantsOf == selected.key ->
+                setStatus("Rendering ${variants.size} variants of ${selected.title}…", AllIcons.Process.Step_1)
+            cached != null -> setStatus(
+                "${selected.title} · $label${issues(cached)}${cached.notes.joinToString("") { " · $it" }} · " +
+                    "${images.size} variants in ${"%.1f".format(state!!.variantMillis / 1000.0)} s",
+                issueIcon(cached),
+            )
+            images.isNotEmpty() -> setStatus("${selected.title} · select a variant", null)
+            state != null && selected.key in state.freshVariants -> setStatus("Failed to render the variants — see the log", AllIcons.General.Error)
+            else -> setStatus("Variants not rendered yet", null)
+        }
+    }
+
+    private fun issues(cached: CachedPreview): String = cached.accessibility.size.takeIf { it > 0 }
+        ?.let { " · $it accessibility issue${if (it == 1) "" else "s"}" }.orEmpty()
+
+    private fun issueIcon(cached: CachedPreview): Icon =
+        if (cached.problems.isEmpty() && cached.accessibility.isEmpty()) AllIcons.General.InspectionsOK else AllIcons.General.Warning
 
     private fun updateStatus(state: FileState?, selected: PreviewEntry?, cached: CachedPreview?, rendering: Boolean) {
         val summary = state?.takeIf { !it.stale || it.images.isNotEmpty() }?.let {
@@ -386,18 +542,28 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             selected.problem != null -> setStatus(selected.problem, AllIcons.General.Warning)
             cached != null -> {
                 val notes = cached.notes.joinToString("") { " · $it" }
-                val icon = if (cached.problems.isEmpty()) AllIcons.General.InspectionsOK else AllIcons.General.Warning
-                setStatus("${selected.title}$notes${summary?.let { " · $it" }.orEmpty()}", icon)
+                setStatus("${selected.title}${issues(cached)}$notes${summary?.let { " · $it" }.orEmpty()}", issueIcon(cached))
             }
             state != null && !state.stale -> setStatus("Failed to render (exit ${state.exitCode}) — see the log", AllIcons.General.Error)
             else -> setStatus("Not rendered yet", null)
         }
     }
 
-    private fun setProblems(problems: List<String>) {
-        problemsArea.text = problems.joinToString("\n\n────────\n\n")
+    /** Errors first, then failed accessibility guidelines. */
+    private fun setProblems(cached: CachedPreview?) {
+        val problems = cached?.problems.orEmpty()
+        val accessibility = cached?.accessibility.orEmpty()
+        problemsArea.text = buildString {
+            append(problems.joinToString("\n\n────────\n\n"))
+            if (accessibility.isNotEmpty()) {
+                if (problems.isNotEmpty()) append("\n\n────────\n\n")
+                append("Accessibility\n")
+                accessibility.forEach { append("• ").append(it).append('\n') }
+            }
+        }
+        problemsArea.foreground = if (problems.isNotEmpty()) JBColor.RED else ACCESSIBILITY_COLOR
         problemsArea.caretPosition = 0
-        problemsPane.isVisible = problems.isNotEmpty()
+        problemsPane.isVisible = problems.isNotEmpty() || accessibility.isNotEmpty()
         problemsPane.revalidate()
     }
 
@@ -476,7 +642,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     private fun onSourcesSaved() {
         val root = currentRoot?.dir?.path ?: return
         // A saved widget can change any preview of the package: everything cached for it is stale.
-        states.filterKeys { it.startsWith("$root/") }.values.forEach { it.stale = true }
+        states.filterKeys { it.startsWith("$root/") }.values.forEach { it.stale = true; it.freshVariants.clear() }
         reparse()
         refreshView()
         if (renderOnSave) renderFile()
@@ -559,36 +725,55 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
 
     // region Rendering
 
-    /** Renders every preview of the current file in one `flutter test` run. */
-    private fun renderFile() {
+    /**
+     * Renders every preview of the current file in one `flutter test` run, plus the variants of the selected
+     * preview in variant mode. [variantsOnly]: just those variants, as the file's renders are current.
+     */
+    private fun renderFile(variantsOnly: Boolean = false) {
         val file = currentFile ?: return
         val root = currentRoot ?: return
-        val renderable = entries.filter { it.invocation != null }
-        if (renderable.isEmpty()) return
+        val variants = list.selectedValue?.takeIf { variantMode && it.invocation != null }
+            ?.let { VariantRequest(it, PreviewVariants.forEntry(it, variantDimensions)) }
+        val renderable = if (variantsOnly) emptyList() else entries.filter { it.invocation != null }
+        if (renderable.isEmpty() && variants == null) return
         ensureSetup(root)
+        // Mark it now: the render starts a moment later, and selection changes must not start another one.
+        renderingPath = file.path
+        renderingVariantsOf = variants?.entry?.key
 
         // The harness is compiled from disk, so save first.
         withWriteIntent {
             FileDocumentManager.getInstance().saveAllDocuments()
-            startRender(file, root, renderable)
+            startRender(file, root, renderable, variants)
         }
     }
 
-    private fun startRender(file: VirtualFile, root: PubRoot, renderable: List<PreviewEntry>) {
+    private fun startRender(file: VirtualFile, root: PubRoot, renderable: List<PreviewEntry>, variants: VariantRequest?) {
+        fun fail(message: String) {
+            renderingPath = null
+            renderingVariantsOf = null
+            refreshView()
+            setStatus(message, AllIcons.General.Error)
+        }
         val environment = EnvironmentUtil.getEnvironmentMap()
         val sdk = FlutterSdkLocator.find(root, environment)
-            ?: return setStatus("Flutter SDK not found. Run `flutter pub get` in ${root.dir.path}, or set FLUTTER_ROOT.", AllIcons.General.Error)
+            ?: return fail("Flutter SDK not found. Run `flutter pub get` in ${root.dir.path}, or set FLUTTER_ROOT.")
         val harness = try {
-            HarnessGenerator.generate(root, File(file.path), currentText(file), renderable)
+            HarnessGenerator.generate(
+                root, File(file.path), currentText(file), renderable,
+                RenderOptions(accessibility = accessibilityChecks), variants,
+            )
         } catch (e: Exception) {
-            return setStatus("Could not generate the preview harness: ${e.message}", AllIcons.General.Error)
+            return fail("Could not generate the preview harness: ${e.message}")
         }
 
         val generation = renderGeneration.incrementAndGet()
         runningIndicator.getAndSet(null)?.cancel()
         val path = file.path
+        val variantsOnly = renderable.isEmpty()
         renderingPath = path
-        renderingCount = renderable.size
+        renderingVariantsOf = variants?.entry?.key
+        renderingCount = renderable.size + variants?.variants.orEmpty().size
         refreshView()
         val renderer = renderers.computeIfAbsent(sdk.path) { PreviewRenderer(sdk, environment) }
 
@@ -601,10 +786,10 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
                 myIndicator = indicator
                 runningIndicator.set(indicator)
                 indicator.isIndeterminate = true
-                indicator.text = "Rendering ${renderable.size} previews of ${file.name}"
+                indicator.text = "Rendering $renderingCount previews of ${file.name}"
                 val batch = renderer.render(root, harness) { indicator.isCanceled || generation != renderGeneration.get() }
                 decoded = batch.images.mapValues { (_, img) ->
-                    CachedPreview(img.png, ImageIO.read(ByteArrayInputStream(img.png)), img.pixelRatio, img.problems, img.notes)
+                    CachedPreview(img.png, ImageIO.read(ByteArrayInputStream(img.png)), img.pixelRatio, img.problems, img.notes, img.accessibility)
                 }
                 result = batch
             }
@@ -612,20 +797,35 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             override fun onSuccess() {
                 val batch = result ?: return
                 val state = states.getOrPut(path) { FileState() }
-                val keepPrevious = decoded.isEmpty() && state.images.isNotEmpty()
+                val variantImages = variants?.let { request ->
+                    request.variants.mapNotNull { v -> decoded[PreviewVariants.imageKey(request.entry.key, v.id)]?.let { v.id to it } }.toMap()
+                }.orEmpty()
+                val variantKeys = variants?.variants.orEmpty().map { PreviewVariants.imageKey(variants!!.entry.key, it.id) }.toSet()
+                val fileImages = decoded - variantKeys
+                val keepPrevious = decoded.isEmpty() && (state.images.isNotEmpty() || state.variants.isNotEmpty())
                 state.apply {
                     // While editing, a save often catches the code mid-change: keep the last good images.
-                    if (!keepPrevious) {
-                        images = decoded
-                        millis = batch.millis
+                    if (!variantsOnly) {
+                        if (fileImages.isNotEmpty() || images.isEmpty()) {
+                            images = fileImages
+                            millis = batch.millis
+                        }
+                        lastFailed = fileImages.isEmpty()
+                        stale = false
                     }
-                    lastFailed = decoded.isEmpty()
-                    stale = false
+                    variants?.let { request ->
+                        freshVariants += request.entry.key
+                        if (variantImages.isNotEmpty() || request.entry.key !in this.variants) {
+                            this.variants[request.entry.key] = variantImages
+                            variantMillis = batch.millis
+                        }
+                    }
                     log = batch.log
                     exitCode = batch.exitCode
                 }
                 if (generation == renderGeneration.get()) {
                     renderingPath = null
+                    renderingVariantsOf = null
                     if (path == currentFile?.path) {
                         if (decoded.isEmpty() && !keepPrevious && !showingLog) {
                             // Nothing rendered at all usually means the harness didn't compile: show why.
@@ -638,6 +838,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
                     }
                 }
                 refreshView()
+                if (generation == renderGeneration.get()) ensureVariants()
             }
 
             override fun onCancel() = finished()
@@ -656,6 +857,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
             private fun finished() {
                 if (generation == renderGeneration.get()) {
                     renderingPath = null
+                    renderingVariantsOf = null
                     refreshView()
                 }
             }
@@ -681,7 +883,7 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
     private fun toggle(
         text: String,
         description: String,
-        icon: Icon,
+        icon: Icon?,
         get: () -> Boolean,
         set: (Boolean) -> Unit,
         enabled: () -> Boolean = { true },
@@ -708,5 +910,6 @@ class FlutterPreviewPanel(private val project: Project) : SimpleToolWindowPanel(
         const val CARD_LOG = "log"
         const val MAX_CACHED_FILES = 6
         const val NOTIFICATION_GROUP = "Flutter Preview"
+        val ACCESSIBILITY_COLOR = JBColor(java.awt.Color(0xA35200), java.awt.Color(0xE0A04A))
     }
 }

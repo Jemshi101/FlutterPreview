@@ -1,5 +1,6 @@
 package `in`.bleuphoenix.flutterpreview.ui
 
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.ui.JBColor
 import com.intellij.ui.PopupHandler
@@ -7,7 +8,6 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
-import `in`.bleuphoenix.flutterpreview.core.PreviewEntry
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Graphics
@@ -24,10 +24,19 @@ import javax.swing.SwingConstants
 import kotlin.math.max
 import kotlin.math.min
 
-/** Thumbnails of all previews of a file, wrapped into as many columns as fit. */
+/** One thumbnail: a preview of the file, or a variant of one preview. */
+data class GridItem(
+    val key: String,
+    val title: String,
+    val preview: CachedPreview?,
+    /** Shown instead of an image, e.g. "Rendering…". */
+    val placeholder: String,
+)
+
+/** Thumbnails of all previews of a file (or all variants of one preview), wrapped into as many columns as fit. */
 class PreviewGridPanel(
-    private val onSelect: (PreviewEntry) -> Unit,
-    private val onOpen: (PreviewEntry) -> Unit,
+    private val onSelect: (String) -> Unit,
+    private val onOpen: (String) -> Unit,
     private val popup: ActionGroup,
 ) : JPanel(null), Scrollable {
 
@@ -51,12 +60,9 @@ class PreviewGridPanel(
         repaint()
     }
 
-    /** [pending]: shown on cards without an image (e.g. "Rendering…"). */
-    fun setItems(entries: List<PreviewEntry>, images: Map<String, CachedPreview>, selectedKey: String?, pending: String) {
+    fun setItems(items: List<GridItem>, selectedKey: String?) {
         removeAll()
-        cards = entries.map { entry ->
-            Card(entry, images[entry.key], entry.key == selectedKey, entry.problem ?: pending).also(::add)
-        }
+        cards = items.map { item -> Card(item, item.key == selectedKey).also(::add) }
         revalidate()
         repaint()
     }
@@ -90,25 +96,25 @@ class PreviewGridPanel(
     override fun getScrollableTracksViewportWidth() = true
     override fun getScrollableTracksViewportHeight() = (parent as? JViewport)?.let { it.height > preferredSize.height } ?: false
 
-    private inner class Card(
-        val entry: PreviewEntry,
-        val preview: CachedPreview?,
-        val selected: Boolean,
-        val placeholder: String,
-    ) : JPanel(BorderLayout()) {
+    private inner class Card(val item: GridItem, val selected: Boolean) : JPanel(BorderLayout()) {
+        val preview = item.preview
 
         init {
             isOpaque = false
-            toolTipText = entry.title
+            toolTipText = listOfNotNull(
+                item.title,
+                preview?.problems?.size?.takeIf { it > 0 }?.let { "$it error${if (it == 1) "" else "s"}" },
+                preview?.accessibility?.size?.takeIf { it > 0 }?.let { "$it accessibility issue${if (it == 1) "" else "s"}" },
+            ).joinToString(" · ")
             add(Thumb(), BorderLayout.CENTER)
-            add(JBLabel(entry.title).apply {
+            add(JBLabel(item.title).apply {
                 border = JBUI.Borders.empty(3, 4, 0, 4)
                 if (selected) foreground = JBUI.CurrentTheme.Link.Foreground.ENABLED
             }, BorderLayout.SOUTH)
             val mouse = object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent) {
-                    onSelect(entry)
-                    if (e.clickCount == 2) onOpen(entry)
+                    onSelect(item.key)
+                    if (e.clickCount == 2) onOpen(item.key)
                 }
             }
             addMouseListener(mouse)
@@ -134,10 +140,17 @@ class PreviewGridPanel(
                     } else {
                         g2.color = UIUtil.getContextHelpForeground()
                         g2.font = JBUI.Fonts.smallFont()
-                        val text = placeholder.lineSequence().first().take(60)
+                        val text = item.placeholder.lineSequence().first().take(60)
                         val fm = g2.fontMetrics
                         g2.drawString(text, max(4, (width - fm.stringWidth(text)) / 2), height / 2)
                     }
+                    val badge = when {
+                        preview == null -> null
+                        preview.problems.isNotEmpty() -> AllIcons.General.Error
+                        preview.accessibility.isNotEmpty() -> AllIcons.General.Warning
+                        else -> null
+                    }
+                    badge?.paintIcon(this, g2, width - badge.iconWidth - JBUI.scale(6), JBUI.scale(6))
                     g2.color = if (selected) JBUI.CurrentTheme.Focus.focusColor() else JBColor.border()
                     g2.stroke = java.awt.BasicStroke(if (selected) JBUIScale.scale(2f) else 1f)
                     g2.drawRoundRect(0, 0, width - 1, height - 1, JBUI.scale(8), JBUI.scale(8))

@@ -3,6 +3,19 @@
 All notable changes to Flutter Preview. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-11-18
+
+### Added
+- Variant matrix: shows the selected preview as declared and in the other theme, with 1.5× and 2× text,
+  right-to-left, and at small-phone and tablet widths, side by side. The ⋮ menu picks the dimensions.
+- Accessibility checks on every render: text contrast, tap target size and labels on tappable elements (Flutter's
+  accessibility guidelines). Issues are listed under the image, counted in the preview list and marked on grid
+  thumbnails. A toolbar toggle turns them off.
+
+### Changed
+- Previews get the theme's brightness in `MediaQuery.platformBrightness` too, so widgets that read it follow
+  `brightness:`.
+
 ## [0.6.2] - 2026-11-13
 
 ### Changed

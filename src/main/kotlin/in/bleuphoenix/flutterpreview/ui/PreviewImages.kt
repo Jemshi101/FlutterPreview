@@ -17,6 +17,7 @@ class CachedPreview(
     val pixelRatio: Double,
     val problems: List<String>,
     val notes: List<String>,
+    val accessibility: List<String> = emptyList(),
 )
 
 object PreviewImages {
