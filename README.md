@@ -1,5 +1,9 @@
 # Flutter Preview
 
+[![JetBrains Marketplace version](https://img.shields.io/jetbrains/plugin/v/36090?label=JetBrains%20Marketplace)](https://plugins.jetbrains.com/plugin/36090-flutter-preview)
+[![Downloads](https://img.shields.io/jetbrains/plugin/d/36090)](https://plugins.jetbrains.com/plugin/36090-flutter-preview)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+
 An Android Studio plugin that renders Flutter `@Preview` widgets right in the IDE. It runs **headlessly with
 `flutter test`**, so it needs no browser, no emulator and no running app.
 
@@ -60,7 +64,14 @@ The package must have run `flutter pub get` (`.dart_tool/package_config.json` mu
 
 ## Install
 
-The plugin isn't on the JetBrains Marketplace yet. Build it from source:
+**From the JetBrains Marketplace (recommended):** in Android Studio go to **Settings → Plugins → Marketplace**,
+search for **Flutter Preview**, install it and restart. Or open the [Marketplace page](https://plugins.jetbrains.com/plugin/36090-flutter-preview).
+
+**From a GitHub release:** download `FlutterPreview-<version>.zip` from
+[Releases](https://github.com/Jemshi101/FlutterPreview/releases), then go to **Settings → Plugins → ⚙ → Install
+Plugin from Disk…**, pick the zip, and restart.
+
+**From source:**
 
 ```sh
 git clone https://github.com/Jemshi101/FlutterPreview.git
@@ -68,13 +79,13 @@ cd FlutterPreview
 ./gradlew buildPlugin
 ```
 
-Then in Android Studio go to **Settings → Plugins → ⚙ → Install Plugin from Disk…**, pick
-`build/distributions/FlutterPreview-<version>.zip`, and restart.
+Then install `build/distributions/FlutterPreview-<version>.zip` with **Install Plugin from Disk…** as above.
+
 Open the plugin from **View → Tool Windows → Flutter Preview**. To try it without your own project, open the
 [`sample/`](sample) folder after running `flutter pub get` in it.
 
-`gradle.properties` points `androidStudioPath` at `/Applications/Android Studio.app`; change it if your Android
-Studio is installed somewhere else.
+When building from source, `gradle.properties` points `androidStudioPath` at `/Applications/Android Studio.app`;
+change it if your Android Studio is installed somewhere else.
 
 ## Writing previews
 
